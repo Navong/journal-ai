@@ -439,7 +439,7 @@ const JournalApp: React.FC = () => {
         const result = await syncAudioToDatabase((progress) => {
           setAudioSyncProgress(progress);
           // Log progress but don't show toast (background operation)
-          if (progress.isComplete) {
+            if (progress.isComplete) {
             console.log(`[JournalApp] Audio sync complete: ${progress.saved} file(s) synced, ${progress.errors} error(s)`);
           }
         });
@@ -456,7 +456,7 @@ const JournalApp: React.FC = () => {
         setIsAudioSyncing(false);
         setAudioSyncProgress(null);
         // Reset ref immediately to allow next scheduled sync
-        audioSyncRef.current = false;
+          audioSyncRef.current = false;
       }
     };
 
@@ -814,6 +814,8 @@ const JournalApp: React.FC = () => {
       source.playbackRate.value = playbackRate;
 
       const gainNode = ctx.createGain();
+      // CRITICAL for iOS: Explicitly set gain value (iOS Safari can default to 0)
+      gainNode.gain.value = 1.0;
       source.connect(gainNode);
       gainNode.connect(ctx.destination);
 
@@ -907,8 +909,12 @@ const JournalApp: React.FC = () => {
         };
 
         ensureContextRunning()
-          .then(() => {
+          .then(async () => {
             try {
+              // iOS Safari sometimes needs a small delay after connecting audio graph
+              // Wait a tiny bit to ensure audio graph is fully initialized
+              await new Promise(resolve => setTimeout(resolve, 10));
+              
               // Update start time right when playback actually begins
               timingInfo.startTime = Date.now();
               source.start(0);
@@ -1489,21 +1495,21 @@ const JournalApp: React.FC = () => {
               // Save optimized version if available, otherwise save original
               const audioToSave = optimized || audioResult;
               historyService.saveEntryAudio(newId, audioToSave)
-                .then(() => {
-                  console.log(`[JournalApp] ✅ Audio saved to database for entry ${newId}`);
-                })
-                .catch(err => {
+                    .then(() => {
+                      console.log(`[JournalApp] ✅ Audio saved to database for entry ${newId}`);
+                    })
+                    .catch(err => {
                   console.warn('[JournalApp] Failed to save audio to database:', err);
-                });
+                    });
             }).catch(err => {
               console.warn('[JournalApp] Error during audio sync setup, trying direct save:', err);
               // Fallback: try saving original directly
-              historyService.saveEntryAudio(newId, audioResult)
-                .then(() => {
+                  historyService.saveEntryAudio(newId, audioResult)
+                    .then(() => {
                   console.log(`[JournalApp] ✅ Audio saved to database (fallback) for entry ${newId}`);
-                })
-                .catch(() => { });
-            });
+                    })
+                    .catch(() => { });
+                });
 
             // Note: We don't await - this runs in background so audio can play immediately
           }
@@ -1813,56 +1819,32 @@ const JournalApp: React.FC = () => {
     <div className="min-h-screen px-4 md:px-6 py-6 md:py-20 max-w-2xl mx-auto flex flex-col">
       <ToastContainer />
 
-      {/* Audio Sync Indicator */}
-      {isAudioSyncing && audioSyncProgress && (
-        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3 text-sm">
-          <div className="flex-shrink-0">
-            <svg className="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-          </div>
-          <div className="flex-grow min-w-0">
-            <div className="text-blue-700 font-medium">Syncing audio to cloud...</div>
-            <div className="text-blue-600 text-xs mt-1">
-              {audioSyncProgress.processed} / {audioSyncProgress.total} ({audioSyncProgress.saved} saved)
-            </div>
-            <div className="w-full bg-blue-200 rounded-full h-1.5 mt-2">
-              <div
-                className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
-                style={{ width: `${(audioSyncProgress.processed / audioSyncProgress.total) * 100}%` }}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
       {isDemoMode && (
-        <div className="mb-6 p-4 bg-amber-50/50 border border-amber-200/50 rounded-lg flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="mb-4 md:mb-6 p-3 md:p-4 bg-amber-50/50 border border-amber-200/50 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 md:gap-4">
+          <div className="flex items-start gap-2.5 md:gap-3 flex-1 min-w-0">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 md:h-5 md:w-5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <div>
-              <p className="text-sm font-medium text-amber-900">Demo Mode</p>
-              <p className="text-xs text-amber-700 font-light">Your entries won't be saved. <button onClick={() => window.location.href = '/login'} className="underline hover:text-amber-900">Sign in to save your thoughts.</button></p>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs md:text-sm font-medium text-amber-900 mb-0.5">Demo Mode</p>
+              <p className="text-[10px] md:text-xs text-amber-700 font-light leading-relaxed">Your entries won't be saved. <button onClick={() => window.location.href = '/login'} className="underline hover:text-amber-900">Sign in</button></p>
             </div>
           </div>
           <button
             onClick={handleExitDemo}
-            className="text-xs text-amber-700 hover:text-amber-900 font-medium px-3 py-1 rounded-full hover:bg-amber-100 transition-colors"
+            className="text-[10px] md:text-xs text-amber-700 hover:text-amber-900 font-medium px-3 py-1.5 md:py-1 rounded-full hover:bg-amber-100 transition-colors flex-shrink-0 touch-manipulation"
           >
             Exit Demo
           </button>
         </div>
       )}
 
-      <header className="mb-8 md:mb-12 text-center md:text-left flex flex-col md:flex-row md:items-end md:justify-between border-b border-stone-100 pb-6 md:pb-8">
+      <header className="mb-6 md:mb-12 text-center md:text-left flex flex-col md:flex-row md:items-end md:justify-between border-b border-stone-100 pb-4 md:pb-8">
         <div>
-          <h1 className="text-2xl md:text-4xl font-light text-stone-800 tracking-tight font-serif mb-1 md:mb-2">
+          <h1 className="text-xl md:text-4xl font-light text-stone-800 tracking-tight font-serif mb-0.5 md:mb-2">
             Serenity Journal
           </h1>
-          <p className="text-stone-500 text-xs md:text-base font-light">
+          <p className="text-stone-500 text-[10px] md:text-base font-light">
             A quiet space for your thoughts.
           </p>
         </div>
@@ -1891,12 +1873,21 @@ const JournalApp: React.FC = () => {
                 Active
               </span>
             )}
+            {isAudioSyncing && audioSyncProgress && (
+              <span className="flex items-center gap-1.5 text-[9px] md:text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 md:py-1 rounded-full uppercase tracking-widest font-bold border border-emerald-100">
+                <svg className="animate-spin h-2.5 w-2.5 md:h-3 md:w-3 text-emerald-500" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Syncing
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2 md:gap-3">
             <button
               onClick={() => setViewMode(viewMode === ViewMode.JOURNAL ? ViewMode.HISTORY : ViewMode.JOURNAL)}
-              className="flex items-center gap-1.5 text-stone-500 hover:text-emerald-700 text-xs md:text-sm transition-colors px-3 py-1 rounded-full hover:bg-emerald-50"
+              className="flex items-center gap-1.5 text-stone-500 hover:text-emerald-700 text-xs md:text-sm transition-colors px-3 py-2 md:py-1 rounded-full hover:bg-emerald-50 touch-manipulation min-h-[44px] md:min-h-0"
             >
               {viewMode === ViewMode.JOURNAL ? (
                 <><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> History</>
@@ -1922,7 +1913,7 @@ const JournalApp: React.FC = () => {
                       }
                       signOut({ callbackUrl: '/login' });
                     }}
-                    className="flex items-center gap-1.5 text-stone-400 hover:text-stone-600 text-xs md:text-sm transition-colors px-3 py-1 rounded-full hover:bg-stone-50"
+                    className="flex items-center gap-1.5 text-stone-400 hover:text-stone-600 text-xs md:text-sm transition-colors px-3 py-2 md:py-1 rounded-full hover:bg-stone-50 touch-manipulation min-h-[44px] md:min-h-0"
                     title="Sign out"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1933,7 +1924,7 @@ const JournalApp: React.FC = () => {
                 ) : isDemoMode && (
                   <button
                     onClick={() => window.location.href = '/login'}
-                    className="flex items-center gap-1.5 text-emerald-600 hover:text-emerald-700 text-xs md:text-sm transition-colors px-3 py-1 rounded-full hover:bg-emerald-50 font-medium"
+                    className="flex items-center gap-1.5 text-emerald-600 hover:text-emerald-700 text-xs md:text-sm transition-colors px-3 py-2 md:py-1 rounded-full hover:bg-emerald-50 font-medium touch-manipulation min-h-[44px] md:min-h-0"
                     title="Sign in to save your entries"
                   >
                     Sign in
@@ -1963,7 +1954,7 @@ const JournalApp: React.FC = () => {
                   }
                 }}
                 placeholder="How are you feeling right now?"
-                className="w-full min-h-[250px] md:min-h-[350px] bg-transparent text-lg md:text-2xl font-light text-stone-800 placeholder-stone-300 border-none outline-none focus:ring-0 focus:outline-none resize-none p-0 leading-[1.6] mb-4 transition-all duration-300 overflow-hidden"
+                className="w-full min-h-[200px] md:min-h-[350px] bg-transparent text-base md:text-2xl font-light text-stone-800 placeholder-stone-300 border-none outline-none focus:ring-0 focus:outline-none resize-none p-0 leading-[1.6] mb-3 md:mb-4 transition-all duration-300 overflow-hidden"
                 disabled={status === AppStatus.LOADING}
                 autoFocus
               />
@@ -1977,12 +1968,12 @@ const JournalApp: React.FC = () => {
               )}
             </div>
 
-            <div className="sticky bottom-0 md:bottom-8 py-4 md:py-6 bg-gradient-to-t from-[#FDFCF8] via-[#FDFCF8] to-transparent flex flex-col md:flex-row gap-3 md:gap-4 z-10 sticky-bottom-safe">
+            <div className="sticky bottom-0 md:bottom-8 py-3 md:py-6 pt-4 pb-safe bg-gradient-to-t from-[#FDFCF8] via-[#FDFCF8] to-transparent flex flex-col md:flex-row gap-3 md:gap-4 z-10">
               <button
                 onClick={handleGetReflection}
                 disabled={isButtonDisabled}
                 className={`
-                  group relative flex-grow md:flex-initial px-8 md:px-10 py-3.5 md:py-4 rounded-full font-medium transition-all duration-300 active:scale-95
+                  group relative flex-grow md:flex-initial px-6 md:px-10 py-3.5 md:py-4 rounded-full font-medium transition-all duration-300 active:scale-95 touch-manipulation min-h-[48px] md:min-h-0
                   ${isButtonDisabled
                     ? 'bg-stone-100 text-stone-300 cursor-not-allowed opacity-50'
                     : 'bg-emerald-800 text-emerald-50 hover:bg-emerald-900 shadow-md hover:shadow-lg'}
@@ -2001,7 +1992,7 @@ const JournalApp: React.FC = () => {
                 <AlertDialog.Root open={showStartNewDialog} onOpenChange={setShowStartNewDialog}>
                   <AlertDialog.Trigger asChild>
                     <button
-                      className="px-6 py-2 md:py-4 rounded-full text-stone-400 hover:text-stone-600 hover:bg-stone-100 transition-all text-xs md:text-sm font-medium"
+                      className="px-4 md:px-6 py-3 md:py-4 rounded-full text-stone-400 hover:text-stone-600 hover:bg-stone-100 transition-all text-xs md:text-sm font-medium touch-manipulation min-h-[48px] md:min-h-0"
                     >
                       Start New
                     </button>
@@ -2048,13 +2039,14 @@ const JournalApp: React.FC = () => {
             <ReflectionCard
               reflection={reflection}
               isLoading={status === AppStatus.LOADING}
-              onTogglePlayback={handleTogglePlayback}
+              onPlay={handleTogglePlayback}
+              onPause={pauseCurrentAudio}
+              onStop={stopCurrentAudio}
               isPlaying={isPlayingAudio && activeAudioId === 'main'}
               isPaused={isPaused && activeAudioId === 'main'}
               isGeneratingVoice={isGeneratingVoice && generatingAudioId === 'main'}
               playbackRate={playbackRate}
               onPlaybackRateChange={setPlaybackSpeed}
-              onStop={stopCurrentAudio}
             />
 
             {status === AppStatus.SUCCESS && reflection && (
@@ -2091,6 +2083,7 @@ const JournalApp: React.FC = () => {
             onDeleteEntry={deleteHistoryEntry}
             onClearAll={clearAllHistory}
             onPlayAudio={handleHistoryAudioPlayback}
+            onPauseAudio={pauseCurrentAudio}
             onStopAudio={stopCurrentAudio}
             activeAudioId={activeAudioId}
             isPlaying={isPlayingAudio}

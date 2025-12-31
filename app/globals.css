@@ -58,6 +58,17 @@ textarea:focus-visible {
   bottom: env(safe-area-inset-bottom, 1rem);
 }
 
+/* Safe area padding for iPhone notches */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 1rem);
+}
+
+/* Improve touch targets on mobile */
+.touch-manipulation {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* Radix UI Toast Animations */
 @keyframes slide-in-from-right {
   from {

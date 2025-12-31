@@ -916,15 +916,15 @@ export const generateSpeech = async (
 
       const request = generateSpeechChunk(chunk);
       pendingTTSRequests.set(chunkHash, request);
-      
-      try {
+
+    try {
         const result = await request.finally(() => pendingTTSRequests.delete(chunkHash));
         if (result) results.push(result);
-      } catch (error) {
+    } catch (error) {
         pendingTTSRequests.delete(chunkHash);
         // Continue with other chunks even if one fails
         console.error(`[TTS] Failed to generate chunk ${i + 1}/${chunks.length}:`, error);
-      }
+    }
     }
 
     return results.length > 0 ? results : undefined;

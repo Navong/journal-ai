@@ -11,6 +11,7 @@ interface HistoryViewProps {
   onDeleteEntry?: (id: string) => void;
   onClearAll?: () => void;
   onPlayAudio?: (text: string, id: string) => void;
+  onPauseAudio?: () => void;
   onStopAudio?: () => void;
   activeAudioId?: string | number | null;
   isPlaying?: boolean;
@@ -25,6 +26,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onDeleteEntry,
   onClearAll,
   onPlayAudio,
+  onPauseAudio,
   onStopAudio,
   activeAudioId,
   isPlaying = false,
@@ -59,10 +61,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
   return (
     <div className="flex flex-col animate-in fade-in duration-500">
-      <div className="flex items-center justify-between mb-8 md:mb-12">
+      <div className="flex items-center justify-between mb-6 md:mb-12">
         <button
           onClick={onBack}
-          className="flex items-center gap-1.5 text-stone-500 hover:text-stone-800 transition-colors group text-sm md:text-base"
+          className="flex items-center gap-1.5 text-stone-500 hover:text-stone-800 transition-colors group text-sm md:text-base touch-manipulation min-h-[44px] md:min-h-0 px-2 -ml-2 md:ml-0"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 md:h-5 md:w-5 transition-transform group-hover:-translate-x-1" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M7.707 14.707a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l2.293 2.293a1 1 0 010 1.414z" clipRule="evenodd" />
@@ -219,71 +221,86 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 </div>
 
                 {/* Reflection Card */}
-                <div className="bg-[#F2F6F3] p-4 md:p-6 rounded-xl md:rounded-2xl border border-emerald-100/50 text-stone-800 italic font-serif text-sm md:text-base leading-relaxed mb-4 relative shadow-sm">
-                  {/* Audio Playback Button */}
-                  {onPlayAudio && (
-                    <button
-                      onClick={() => {
-                        const audioId = `history-${item.id}`;
-
-                        // If this audio is currently playing, stop it
-                        if (isPlaying && activeAudioId === audioId) {
-                          if (onStopAudio) {
-                            onStopAudio();
-                          }
-                          return;
-                        }
-
-                        // Always pass reflection text - audio is stored in IndexedDB cache
-                        // The handler will check cache first, then generate if needed
-                        onPlayAudio(item.reflection, audioId);
-                      }}
-                      disabled={isGeneratingVoice && generatingAudioId === `history-${item.id}`}
-                      className={`
-                        absolute top-3 right-3 transition-all p-2 rounded-full active:scale-90
-                        ${isGeneratingVoice && generatingAudioId === `history-${item.id}`
-                          ? 'bg-stone-100 text-stone-300 cursor-wait'
-                          : isPlaying && activeAudioId === `history-${item.id}`
-                            ? isPaused
-                              ? 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100'
-                              : 'text-emerald-600 bg-emerald-100'
-                            : 'text-stone-400 hover:text-emerald-600 hover:bg-stone-100'
-                        }
-                      `}
-                      title={
-                        isGeneratingVoice && generatingAudioId === `history-${item.id}`
-                          ? 'Generating...'
-                          : isPlaying && activeAudioId === `history-${item.id}`
-                            ? isPaused
-                              ? 'Resume'
-                              : 'Playing'
-                            : 'Listen to reflection'
-                      }
-                    >
-                      {isGeneratingVoice && generatingAudioId === `history-${item.id}` ? (
-                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                      ) : isPlaying && activeAudioId === `history-${item.id}` ? (
-                        isPaused ? (
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                        ) : (
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                        )
-                      ) : (
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                        </svg>
-                      )}
-                    </button>
-                  )}
+                <div className="bg-[#F2F6F3] p-4 md:p-6 rounded-xl md:rounded-2xl border border-emerald-100/50 text-stone-800 italic font-serif text-sm md:text-base leading-relaxed mb-3 md:mb-4 shadow-sm">
                   <ReactMarkdown>{item.reflection}</ReactMarkdown>
+                  {/* Audio Playback Buttons */}
+                  {(onPlayAudio || onPauseAudio || onStopAudio) && (
+                    <div className="mt-3 md:mt-4 flex justify-end gap-2">
+                      {(() => {
+                        const audioId = `history-${item.id}`;
+                        const isThisAudioActive = isPlaying && activeAudioId === audioId;
+                        const isThisAudioPaused = isPaused && activeAudioId === audioId;
+                        const isThisGenerating = isGeneratingVoice && generatingAudioId === audioId;
+
+                        return (
+                          <>
+                            {/* Play Button */}
+                            {onPlayAudio && (
+                              <button
+                                onClick={() => onPlayAudio(item.reflection, audioId)}
+                                disabled={isThisGenerating || (isThisAudioActive && !isThisAudioPaused)}
+                                className={`transition-all p-2.5 md:p-2 rounded-full active:scale-90 touch-manipulation min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center ${
+                                  isThisGenerating || (isThisAudioActive && !isThisAudioPaused)
+                                    ? 'bg-stone-100 text-stone-300 cursor-not-allowed opacity-50'
+                                    : 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100'
+                                }`}
+                                title={isThisGenerating ? "Generating..." : "Play"}
+                              >
+                                {isThisGenerating ? (
+                                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                  </svg>
+                                ) : (
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                )}
+                              </button>
+                            )}
+
+                            {/* Pause Button */}
+                            {onPauseAudio && (
+                              <button
+                                onClick={onPauseAudio}
+                                disabled={!isThisAudioActive || isThisAudioPaused || isThisGenerating}
+                                className={`transition-all p-2.5 md:p-2 rounded-full active:scale-90 touch-manipulation min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center ${
+                                  !isThisAudioActive || isThisAudioPaused || isThisGenerating
+                                    ? 'bg-stone-100 text-stone-300 cursor-not-allowed opacity-50'
+                                    : 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100'
+                                }`}
+                                title="Pause"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                              </button>
+                            )}
+
+                            {/* Stop Button */}
+                            {onStopAudio && (
+                              <button
+                                onClick={onStopAudio}
+                                disabled={(!isThisAudioActive && !isThisAudioPaused) || isThisGenerating}
+                                className={`transition-all p-2.5 md:p-2 rounded-full active:scale-90 touch-manipulation min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center ${
+                                  (!isThisAudioActive && !isThisAudioPaused) || isThisGenerating
+                                    ? 'bg-stone-100 text-stone-300 cursor-not-allowed opacity-50'
+                                    : 'text-rose-600 bg-rose-50 hover:bg-rose-100'
+                                }`}
+                                title="Stop"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10h6v4H9z" />
+                                </svg>
+                              </button>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
 
                 {/* Chat Thread */}
