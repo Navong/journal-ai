@@ -1,4 +1,6 @@
 // IndexedDB audio cache utility
+import { hashText } from './textHash';
+
 const DB_NAME = 'serenity-journal-audio-cache';
 const DB_VERSION = 1;
 const STORE_NAME = 'audio';
@@ -40,24 +42,12 @@ export class AudioCache {
     return this.initPromise;
   }
 
-  private hashText(text: string): string {
-    // Simple hash function for text
-    let hash = 0;
-    const normalized = text.trim().toLowerCase();
-    for (let i = 0; i < normalized.length; i++) {
-      const char = normalized.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
-    }
-    return hash.toString(36);
-  }
-
   async get(text: string): Promise<string | null> {
     try {
       await this.init();
       if (!this.db) return null;
 
-      const textHash = this.hashText(text);
+      const textHash = hashText(text);
       return new Promise((resolve, reject) => {
         const transaction = this.db!.transaction([STORE_NAME], 'readonly');
         const store = transaction.objectStore(STORE_NAME);
@@ -94,7 +84,7 @@ export class AudioCache {
       await this.init();
       if (!this.db) return;
 
-      const textHash = this.hashText(text);
+      const textHash = hashText(text);
       const entry: AudioCacheEntry = {
         textHash,
         audioBase64,
@@ -229,9 +219,10 @@ export class AudioCache {
 
   /**
    * Public method to hash text (for migration matching)
+   * @deprecated Use hashText from './textHash' directly instead
    */
   public hashTextPublic(text: string): string {
-    return this.hashText(text);
+    return hashText(text);
   }
 }
 
