@@ -1,0 +1,137 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-inter: 'Inter', sans-serif;
+  --font-lora: 'Lora', serif;
+}
+
+body {
+  font-family: var(--font-inter);
+  background-color: #FDFCF8;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.font-serif {
+  font-family: var(--font-lora);
+}
+
+::placeholder {
+  color: #A8A29E;
+  opacity: 0.6;
+}
+
+/* Remove all outlines from textareas */
+textarea {
+  outline: none !important;
+}
+
+textarea:focus {
+  outline: none !important;
+  border: none !important;
+}
+
+textarea:focus-visible {
+  outline: none !important;
+}
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for IE, Edge and Firefox */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  /* IE and Edge */
+  scrollbar-width: none;
+  /* Firefox */
+}
+
+.mask-fade-bottom {
+  mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+}
+
+/* Ensure sticky footers handle mobile browser bars better */
+.sticky-bottom-safe {
+  bottom: env(safe-area-inset-bottom, 1rem);
+}
+
+/* Radix UI Toast Animations */
+@keyframes slide-in-from-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-out-to-right {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+/* Toast animations */
+[role="status"][data-state="open"] {
+  animation: slide-in-from-right 0.2s ease-out;
+}
+
+[role="status"][data-state="closed"] {
+  animation: slide-out-to-right 0.15s ease-in;
+}
+
+/* Radix UI Alert Dialog Animations */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes zoom-in-95 {
+  from {
+    transform: translate(-50%, -50%) scale(0.95);
+    opacity: 0;
+  }
+
+  to {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-in {
+  animation-fill-mode: forwards;
+}
+
+.fade-in {
+  animation: fade-in 0.2s ease-out forwards;
+}
+
+/* Alert Dialog Content - ensure it stays centered */
+.zoom-in-95 {
+  transform: translate(-50%, -50%) !important;
+  will-change: transform;
+  animation: zoom-in-95 0.2s ease-out forwards;
+}
+
+/* After animation, ensure transform is maintained */
+.zoom-in-95[data-state="open"] {
+  animation: zoom-in-95 0.2s ease-out forwards;
+  transform: translate(-50%, -50%) scale(1) !important;
+}
