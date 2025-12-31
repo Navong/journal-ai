@@ -801,47 +801,53 @@ function chunkTextForTTS(text: string, maxLength: number = 1500): string[] {
   return chunks.filter(chunk => chunk.length > 0);
 }
 
-// Generate speech with retry logic
+// Generate speech using server-side API (prevents rate limit issues)
 async function generateSpeechChunk(
   text: string,
   retries: number = 3,
   delay: number = 1000
 ): Promise<string | undefined> {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not configured. Please set NEXT_PUBLIC_GEMINI_API_KEY in your .env.local file');
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
-  const cleanedContent = cleanTextForTTS(text);
-
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: `Speak warmly and gently: ${cleanedContent}` }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Kore' },
-            },
-          },
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ text }),
       });
 
-      const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (audioData) {
-        return audioData;
+      if (response.status === 429) {
+        // Rate limit exceeded - get retry-after header
+        const retryAfter = response.headers.get('Retry-After');
+        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : delay * Math.pow(2, attempt);
+        
+        const isLastAttempt = attempt === retries - 1;
+        if (isLastAttempt) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || 'Rate limit exceeded. Please try again later.');
+        }
+
+        console.warn(`[TTS] Rate limit hit, waiting ${waitTime}ms before retry ${attempt + 1}/${retries}`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        continue;
       }
-    } catch (error) {
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `TTS API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.audioData;
+    } catch (error: any) {
       const isLastAttempt = attempt === retries - 1;
       if (isLastAttempt) {
-        console.error(`TTS Error after ${retries} attempts:`, error);
+        console.error(`[TTS] Error after ${retries} attempts:`, error);
         throw error;
       }
 
-      // Exponential backoff: wait longer between retries
+      // Exponential backoff for non-rate-limit errors
       const waitTime = delay * Math.pow(2, attempt);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
@@ -886,23 +892,42 @@ export const generateSpeech = async (
       }
     }
 
-    // Multiple chunks - generate all in parallel
-    const chunkPromises = chunks.map(chunk => {
+    // Multiple chunks - process SERIALLY with delay to avoid rate limits
+    // This prevents hitting rate limits when generating multiple chunks
+    const results: string[] = [];
+    const DELAY_BETWEEN_CHUNKS_MS = 500; // 500ms delay between chunks
+    
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
       const chunkHash = chunk.trim().toLowerCase();
+      
+      // Check if there's already a pending request for this chunk
       const existing = pendingTTSRequests.get(chunkHash);
-      if (existing) return existing;
+      if (existing) {
+        const result = await existing;
+        if (result) results.push(result);
+        continue;
+      }
+
+      // Add delay before each chunk (except the first one)
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_CHUNKS_MS));
+      }
 
       const request = generateSpeechChunk(chunk);
       pendingTTSRequests.set(chunkHash, request);
-      return request.finally(() => pendingTTSRequests.delete(chunkHash));
-    });
-
-    try {
-      const results = await Promise.all(chunkPromises);
-      return results.filter((r): r is string => r !== undefined);
-    } catch (error) {
-      throw error;
+      
+      try {
+        const result = await request.finally(() => pendingTTSRequests.delete(chunkHash));
+        if (result) results.push(result);
+      } catch (error) {
+        pendingTTSRequests.delete(chunkHash);
+        // Continue with other chunks even if one fails
+        console.error(`[TTS] Failed to generate chunk ${i + 1}/${chunks.length}:`, error);
+      }
     }
+
+    return results.length > 0 ? results : undefined;
   }
 
   // Single generation (original behavior for backward compatibility)
