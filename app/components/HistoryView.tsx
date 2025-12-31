@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import { HistoryEntry } from '../types';
 import ReactMarkdown from 'react-markdown';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
-import Link from 'next/link';
 
 interface HistoryViewProps {
   history: HistoryEntry[];
@@ -72,55 +71,47 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         </button>
 
         <div className="flex items-center gap-3">
-          <Link
-            href="/migrate-audio"
-            className="text-stone-400 hover:text-emerald-600 text-[10px] md:text-xs tracking-widest uppercase transition-colors px-2 py-1"
-            title="Migrate audio files to database"
-          >
-            Migrate Audio
-          </Link>
-
           {history.length > 0 && onClearAll && (
-          <AlertDialog.Root open={showClearAllDialog} onOpenChange={setShowClearAllDialog}>
-            <AlertDialog.Trigger asChild>
-              <button
-                className="text-stone-400 hover:text-rose-600 text-[10px] md:text-xs tracking-widest uppercase transition-colors px-2 py-1"
-              >
-                Clear All
-              </button>
-            </AlertDialog.Trigger>
-            <AlertDialog.Portal>
-              <AlertDialog.Overlay className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 animate-in fade-in" />
-              <AlertDialog.Content className="fixed top-1/2 left-1/2 bg-white rounded-2xl shadow-2xl border border-stone-200 p-6 md:p-8 max-w-md w-[90vw] z-50 animate-in fade-in zoom-in-95 duration-200">
-                <AlertDialog.Title className="text-xl md:text-2xl font-semibold text-stone-900 mb-2 font-serif">
-                  Clear All History?
-                </AlertDialog.Title>
-                <AlertDialog.Description className="text-stone-600 mb-6 text-sm md:text-base leading-relaxed">
-                  This will permanently delete all {history.length} {history.length === 1 ? 'entry' : 'entries'}. This action cannot be undone.
-                </AlertDialog.Description>
-                <div className="flex gap-3 justify-end">
-                  <AlertDialog.Cancel asChild>
-                    <button className="px-4 py-2 rounded-full text-stone-600 hover:bg-stone-100 transition-colors text-sm font-medium">
-                      Cancel
-                    </button>
-                  </AlertDialog.Cancel>
-                  <AlertDialog.Action asChild>
-          <button
-            onClick={() => {
-                        if (onClearAll) {
-                          onClearAll();
-              }
-                        setShowClearAllDialog(false);
-            }}
-                      className="px-4 py-2 rounded-full bg-rose-600 text-white hover:bg-rose-700 transition-colors text-sm font-medium"
-          >
-            Clear All
-          </button>
-                  </AlertDialog.Action>
-                </div>
-              </AlertDialog.Content>
-            </AlertDialog.Portal>
-          </AlertDialog.Root>
+            <AlertDialog.Root open={showClearAllDialog} onOpenChange={setShowClearAllDialog}>
+              <AlertDialog.Trigger asChild>
+                <button
+                  className="text-stone-400 hover:text-rose-600 text-[10px] md:text-xs tracking-widest uppercase transition-colors px-2 py-1"
+                >
+                  Clear All
+                </button>
+              </AlertDialog.Trigger>
+              <AlertDialog.Portal>
+                <AlertDialog.Overlay className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 animate-in fade-in" />
+                <AlertDialog.Content className="fixed top-1/2 left-1/2 bg-white rounded-2xl shadow-2xl border border-stone-200 p-6 md:p-8 max-w-md w-[90vw] z-50 animate-in fade-in zoom-in-95 duration-200">
+                  <AlertDialog.Title className="text-xl md:text-2xl font-semibold text-stone-900 mb-2 font-serif">
+                    Clear All History?
+                  </AlertDialog.Title>
+                  <AlertDialog.Description className="text-stone-600 mb-6 text-sm md:text-base leading-relaxed">
+                    This will permanently delete all {history.length} {history.length === 1 ? 'entry' : 'entries'}. This action cannot be undone.
+                  </AlertDialog.Description>
+                  <div className="flex gap-3 justify-end">
+                    <AlertDialog.Cancel asChild>
+                      <button className="px-4 py-2 rounded-full text-stone-600 hover:bg-stone-100 transition-colors text-sm font-medium">
+                        Cancel
+                      </button>
+                    </AlertDialog.Cancel>
+                    <AlertDialog.Action asChild>
+                      <button
+                        onClick={() => {
+                          if (onClearAll) {
+                            onClearAll();
+                          }
+                          setShowClearAllDialog(false);
+                        }}
+                        className="px-4 py-2 rounded-full bg-rose-600 text-white hover:bg-rose-700 transition-colors text-sm font-medium"
+                      >
+                        Clear All
+                      </button>
+                    </AlertDialog.Action>
+                  </div>
+                </AlertDialog.Content>
+              </AlertDialog.Portal>
+            </AlertDialog.Root>
           )}
         </div>
       </div>

@@ -1,9 +1,12 @@
 // Audio migration utility
-// Migrates audio from IndexedDB to database
+// Migrates audio from IndexedDB to database (manual migration page)
+// Note: This is now redundant since automatic background sync is implemented,
+// but kept for backward compatibility with the migrate-audio page
 
 import { audioCache } from './audioCache';
 import { historyService } from '../services/historyService';
 import { optimizeAudio } from './audioOptimizer';
+import { hashText } from './textHash';
 
 export interface MigrationProgress {
   total: number;
@@ -22,20 +25,6 @@ interface MigrationResult {
   saved: number;
   errors: number;
   errorDetails: string[];
-}
-
-/**
- * Hash text using the same algorithm as AudioCache
- */
-function hashText(text: string): string {
-  let hash = 0;
-  const normalized = text.trim().toLowerCase();
-  for (let i = 0; i < normalized.length; i++) {
-    const char = normalized.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return hash.toString(36);
 }
 
 /**

@@ -13,7 +13,7 @@ import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { useSession, signOut } from 'next-auth/react';
 import { historyService } from '../services/historyService';
 import { optimizeAudio } from '../utils/audioOptimizer';
-import { syncAudioToDatabase, getSyncStats, shouldRunSync, getSyncState, AudioSyncProgress } from '../utils/audioSync';
+import { syncAudioToDatabase, getSyncStats, shouldRunSync, getSyncState, AudioSyncProgress, SYNC_INTERVAL } from '../utils/audioSync';
 
 // Generate user-scoped keys to prevent data leakage between users
 const getHistoryKey = (userId: string | null, isDemo: boolean) => {
@@ -133,7 +133,6 @@ const JournalApp: React.FC = () => {
   const isHydratedRef = useRef(false);
   const [isMounted, setIsMounted] = useState(false);
 
-  const [isFocused, setIsFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -403,14 +402,24 @@ const JournalApp: React.FC = () => {
     }
   }, [userId, isDemoMode, session, authStatus]); // Re-run when user/demo/session/status changes
 
-  // Automatic background audio sync
+  // Automatic background audio sync - runs periodically
   useEffect(() => {
-    if (!userId || isDemoMode || audioSyncRef.current) return;
+    // Don't run if user is not authenticated or in demo mode
+    if (!userId || isDemoMode) {
+      console.log('[JournalApp] Audio sync skipped - no user or demo mode');
+      return;
+    }
 
     const runAudioSync = async () => {
-      // Check if sync should run
+      // Don't run if already syncing
+      if (audioSyncRef.current) {
+        console.log('[JournalApp] Audio sync already running, skipping');
+        return;
+      }
+
+      // Check if sync should run (respects SYNC_INTERVAL timing)
       if (!shouldRunSync()) {
-        console.log('[JournalApp] Audio sync not needed yet');
+        console.log('[JournalApp] Audio sync not needed yet (too soon since last sync)');
         return;
       }
 
@@ -426,47 +435,46 @@ const JournalApp: React.FC = () => {
         audioSyncRef.current = true;
         setIsAudioSyncing(true);
 
-        // Show initial toast
-        showToast(`Syncing ${stats.entriesNeedingSync} audio file(s) to cloud...`, 'info');
-
+        // Silent background sync - don't show toast to avoid interrupting user
         const result = await syncAudioToDatabase((progress) => {
           setAudioSyncProgress(progress);
-
-          // Update toast periodically
-          if (progress.processed % 5 === 0 || progress.isComplete) {
-            const percentage = Math.round((progress.processed / progress.total) * 100);
-            if (progress.isComplete) {
-              showToast(`Audio sync complete: ${progress.saved} file(s) synced`, 'success');
-            } else {
-              showToast(`Syncing audio... ${percentage}% (${progress.saved} saved)`, 'info');
-            }
+          // Log progress but don't show toast (background operation)
+          if (progress.isComplete) {
+            console.log(`[JournalApp] Audio sync complete: ${progress.saved} file(s) synced, ${progress.errors} error(s)`);
           }
         });
 
         if (result.success && result.saved > 0) {
-          showToast(`✅ ${result.saved} audio file(s) synced to cloud`, 'success');
+          console.log(`[JournalApp] ✅ ${result.saved} audio file(s) synced to cloud`);
         } else if (result.errors > 0) {
-          showToast(`⚠️ Audio sync completed with ${result.errors} error(s)`, 'info');
+          console.warn(`[JournalApp] ⚠️ Audio sync completed with ${result.errors} error(s)`);
         }
       } catch (error) {
         console.error('[JournalApp] Audio sync error:', error);
-        showToast('Audio sync failed. You can retry later.', 'error');
+        // Don't show error toast - it's a background operation
       } finally {
         setIsAudioSyncing(false);
         setAudioSyncProgress(null);
-        // Reset ref after a delay to allow future syncs
-        setTimeout(() => {
-          audioSyncRef.current = false;
-        }, 60000); // Wait 1 minute before allowing another sync
+        // Reset ref immediately to allow next scheduled sync
+        audioSyncRef.current = false;
       }
     };
 
-    // Run sync after a short delay to let the app load first
-    const syncTimeout = setTimeout(() => {
+    // Run initial sync after a short delay to let the app load first
+    const initialSyncTimeout = setTimeout(() => {
       runAudioSync();
-    }, 2000);
+    }, 5000); // 5 second initial delay
 
-    return () => clearTimeout(syncTimeout);
+    // Set up periodic sync using setInterval
+    const syncInterval = setInterval(() => {
+      runAudioSync();
+    }, SYNC_INTERVAL); // Use the same interval as defined in audioSync.ts (5 minutes)
+
+    // Cleanup on unmount or when user/mode changes
+    return () => {
+      clearTimeout(initialSyncTimeout);
+      clearInterval(syncInterval);
+    };
   }, [userId, isDemoMode]);
 
   useEffect(() => {
@@ -1849,7 +1857,7 @@ const JournalApp: React.FC = () => {
         </div>
       )}
 
-      <header className={`mb-8 md:mb-12 text-center md:text-left flex flex-col md:flex-row md:items-end md:justify-between border-b border-stone-100 pb-6 md:pb-8 transition-opacity duration-700 ${isFocused ? 'opacity-30' : 'opacity-100'}`}>
+      <header className="mb-8 md:mb-12 text-center md:text-left flex flex-col md:flex-row md:items-end md:justify-between border-b border-stone-100 pb-6 md:pb-8">
         <div>
           <h1 className="text-2xl md:text-4xl font-light text-stone-800 tracking-tight font-serif mb-1 md:mb-2">
             Serenity Journal
@@ -1940,13 +1948,11 @@ const JournalApp: React.FC = () => {
       <main className="flex-grow flex flex-col">
         {viewMode === ViewMode.JOURNAL ? (
           <div key={sessionKey} className="relative flex-grow flex flex-col animate-in fade-in duration-500">
-            <div className={`relative flex flex-col flex-grow transition-all duration-500 ${isFocused ? 'scale-[1.01]' : 'scale-100'}`}>
+            <div className="relative flex flex-col flex-grow">
               <textarea
                 ref={textareaRef}
                 value={entry}
                 onChange={handleEntryChange}
-                onFocus={() => setIsFocused(true)}
-                onBlur={() => setIsFocused(false)}
                 onKeyDown={(e) => {
                   // Trigger reflection with Ctrl+Enter (Windows/Linux) or Cmd+Enter (Mac)
                   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -1963,7 +1969,7 @@ const JournalApp: React.FC = () => {
               />
 
               {entry.length > 0 && (
-                <div className={`flex justify-end transition-opacity duration-500 ${isFocused ? 'opacity-100' : 'opacity-40'}`}>
+                <div className="flex justify-end">
                   <span className="text-[9px] md:text-[10px] text-stone-400 uppercase tracking-widest font-bold">
                     {wordCount} {wordCount === 1 ? 'word' : 'words'}
                   </span>
@@ -1971,7 +1977,7 @@ const JournalApp: React.FC = () => {
               )}
             </div>
 
-            <div className={`sticky bottom-0 md:bottom-8 py-4 md:py-6 bg-gradient-to-t from-[#FDFCF8] via-[#FDFCF8] to-transparent flex flex-col md:flex-row gap-3 md:gap-4 transition-opacity duration-500 z-10 ${isFocused && entry.length > 50 ? 'opacity-20 hover:opacity-100' : 'opacity-100'} sticky-bottom-safe`}>
+            <div className="sticky bottom-0 md:bottom-8 py-4 md:py-6 bg-gradient-to-t from-[#FDFCF8] via-[#FDFCF8] to-transparent flex flex-col md:flex-row gap-3 md:gap-4 z-10 sticky-bottom-safe">
               <button
                 onClick={handleGetReflection}
                 disabled={isButtonDisabled}

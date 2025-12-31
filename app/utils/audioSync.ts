@@ -4,6 +4,7 @@
 import { audioCache } from './audioCache';
 import { historyService } from '../services/historyService';
 import { optimizeAudio } from './audioOptimizer';
+import { hashText } from './textHash';
 
 export interface AudioSyncProgress {
   total: number;
@@ -22,22 +23,8 @@ export interface AudioSyncState {
 }
 
 const SYNC_STORAGE_KEY = 'serenity_audio_sync_state';
-const SYNC_INTERVAL = 5 * 60 * 1000; // 5 minutes between syncs
+export const SYNC_INTERVAL = 5 * 60 * 1000; // 5 minutes between syncs
 const MAX_SYNC_ATTEMPTS = 3;
-
-/**
- * Hash text using the same algorithm as AudioCache
- */
-function hashText(text: string): string {
-  let hash = 0;
-  const normalized = text.trim().toLowerCase();
-  for (let i = 0; i < normalized.length; i++) {
-    const char = normalized.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return hash.toString(36);
-}
 
 /**
  * Get sync state from localStorage
@@ -87,7 +74,7 @@ function saveSyncState(state: AudioSyncState): void {
  */
 export function shouldRunSync(): boolean {
   const state = getSyncState();
-  
+
   // If never synced, should run
   if (!state.lastSyncTime) {
     return true;
@@ -151,7 +138,7 @@ export async function syncAudioToDatabase(
   onProgress?: (progress: AudioSyncProgress) => void
 ): Promise<{ success: boolean; saved: number; errors: number }> {
   const state = getSyncState();
-  
+
   // Don't run if already running
   if (state.isRunning) {
     console.log('[audioSync] Sync already running, skipping');
@@ -219,43 +206,63 @@ export async function syncAudioToDatabase(
     const BATCH_SIZE = 3; // Process 3 at a time
     for (let i = 0; i < audioEntries.length; i += BATCH_SIZE) {
       const batch = audioEntries.slice(i, i + BATCH_SIZE);
-      
-      await Promise.allSettled(
+
+      // Process batch and capture results to count successes/failures accurately
+      const results = await Promise.allSettled(
         batch.map(async (audioEntry) => {
           const matchingEntry = reflectionHashMap.get(audioEntry.textHash);
-          if (!matchingEntry) return;
+          if (!matchingEntry) {
+            return { type: 'no_match' as const };
+          }
 
           // Check if entry already has audio in DB (lightweight check, doesn't fetch audio)
           const hasAudio = await historyService.checkEntryAudioExists(matchingEntry.id);
           if (hasAudio) {
-            return; // Already synced
+            return { type: 'already_synced' as const, entryId: matchingEntry.id };
           }
-
-          matched++;
 
           try {
             // Optimize and save
             const optimizedAudio = await optimizeAudio(audioEntry.audioBase64);
             await historyService.saveEntryAudio(matchingEntry.id, optimizedAudio);
-            saved++;
             console.log(`[audioSync] ✅ Synced audio for entry ${matchingEntry.id}`);
+            return { type: 'saved' as const, entryId: matchingEntry.id };
           } catch (error: any) {
-            errors++;
             console.error(`[audioSync] ❌ Error syncing audio for entry ${matchingEntry.id}:`, error);
-            
+
             // Try saving original as fallback
             try {
               await historyService.saveEntryAudio(matchingEntry.id, audioEntry.audioBase64);
-              saved++;
               console.log(`[audioSync] ✅ Saved original audio for entry ${matchingEntry.id}`);
+              return { type: 'saved' as const, entryId: matchingEntry.id };
             } catch (fallbackError) {
               console.error(`[audioSync] ❌ Fallback save failed:`, fallbackError);
+              return { type: 'error' as const, entryId: matchingEntry.id, error: fallbackError };
             }
           }
         })
       );
 
-      // Update progress
+      // Count results from the batch
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          const value = result.value;
+          if (value.type === 'saved') {
+            matched++;
+            saved++;
+          } else if (value.type === 'error') {
+            matched++;
+            errors++;
+          } else if (value.type === 'no_match' || value.type === 'already_synced') {
+            // Don't count these
+          }
+        } else {
+          // Promise rejected
+          errors++;
+        }
+      }
+
+      // Update progress after counting batch results
       const processed = Math.min(i + BATCH_SIZE, audioEntries.length);
       const progress: AudioSyncProgress = {
         total: audioEntries.length,
