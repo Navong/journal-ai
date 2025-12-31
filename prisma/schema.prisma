@@ -1,0 +1,39 @@
+// Prisma Schema for Serenity Journal
+// This schema uses Supabase (PostgreSQL) as the database
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model JournalEntry {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  entryText      String   @map("entry_text")
+  reflectionText String   @map("reflection_text")
+  summary        String?  @map("summary")
+  topic          String?
+  mood           String?
+  audioData      String?  @map("audio_data") // Compressed audio (base64 encoded MP3/AAC)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)]) // Composite index for faster user queries with sorting
+  @@map("journal_entries")
+}
+
+model UserPreference {
+  id              String   @id @default(uuid())
+  userId          String   @unique @map("user_id")
+  autoPlayEnabled Boolean  @default(true) @map("auto_play_enabled")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("user_preferences")
+}
