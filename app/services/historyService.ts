@@ -1,4 +1,7 @@
 import { HistoryEntry, Mood } from '../types';
+import logger from '../utils/logger';
+
+const log = logger;
 
 // Prisma returns camelCase field names
 interface PrismaJournalEntry {
@@ -45,7 +48,11 @@ function fromHistoryEntry(entry: HistoryEntry, includeAudio = false) {
     reflection_text: entry.reflection,
     summary: entry.summary || null,
     topic: entry.topic || null,
-    mood: entry.mood !== 'none' ? entry.mood : null,
+    // Always include mood - save detected mood to database
+    // If mood is 'none' or undefined, save as null (DB stores null for 'none')
+    // If mood is detected (anxious, calm, etc.), save the actual value
+    // IMPORTANT: Always include mood field, even if it's 'none' (saved as null)
+    mood: (entry.mood && entry.mood !== 'none') ? entry.mood : null,
     created_at: entry.timestamp,
   };
 
@@ -79,35 +86,40 @@ export const historyService = {
       }
 
       const url = `/api/history${params.toString() ? `?${params.toString()}` : ''}`;
-      console.log('[historyService] Fetching history from API...', options);
+      log.debug('Fetching history from API', options);
       const response = await fetch(url);
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[historyService] API error: ${response.status}`, errorText);
+        log.error(`API error: ${response.status}`, { status: response.status, errorText });
         if (response.status === 500) {
-          // Database not configured, return empty array
-          console.warn('[historyService] Database not configured or error occurred');
+          // Check if it's a timeout error
+          if (errorText.includes('timeout') || errorText.includes('Connection terminated')) {
+            log.warn('Database connection timeout - returning empty array', { errorText });
+            return [];
+          }
+          // Database not configured or other error, return empty array
+          log.warn('Database not configured or error occurred', { errorText });
           return [];
         }
         if (response.status === 401) {
-          console.warn('[historyService] Unauthorized - user not logged in');
+          log.warn('Unauthorized - user not logged in');
           return [];
         }
         throw new Error(`Failed to fetch history: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('[historyService] Received response:', data);
+      log.debug('Received response', { entryCount: data.entries?.length || 0 });
 
       const entries = data.entries || [];
-      console.log(`[historyService] Converting ${entries.length} entries`);
+      log.debug(`Converting ${entries.length} entries`);
 
       const converted = entries.map(toHistoryEntry);
-      console.log(`[historyService] ✅ Successfully converted ${converted.length} entries`);
+      log.info(`Successfully converted ${converted.length} entries`);
       return converted;
     } catch (error) {
-      console.error('[historyService] Failed to fetch history:', error);
+      log.error('Failed to fetch history', {}, error as Error);
       return [];
     }
   },
@@ -117,13 +129,13 @@ export const historyService = {
   // if false, audio field is omitted to preserve existing audio in database
   async saveEntries(entries: HistoryEntry[], includeAudio = false): Promise<void> {
     if (entries.length === 0) {
-      console.log('[historyService] No entries to save, skipping');
+      log.debug('No entries to save, skipping');
       return;
     }
 
     try {
       const entriesData = entries.map(entry => fromHistoryEntry(entry, includeAudio));
-      console.log(`[historyService] Saving ${entries.length} entries to database${includeAudio ? ' (with audio)' : ' (audio excluded to preserve DB audio)'}`);
+      log.info(`Saving ${entries.length} entries to database${includeAudio ? ' (with audio)' : ' (audio excluded to preserve DB audio)'}`);
 
       const response = await fetch('/api/history', {
         method: 'POST',
@@ -142,21 +154,21 @@ export const historyService = {
             errorData = JSON.parse(text);
           }
         } catch (parseError) {
-          console.warn('[historyService] Failed to parse error response:', parseError);
+          log.warn('Failed to parse error response', {}, parseError as Error);
           errorData = { message: response.statusText || 'Unknown error' };
         }
 
-        console.error(`[historyService] Save failed with status ${response.status}:`, errorData);
-        console.error(`[historyService] Error details:`, {
-          status: response.status,
-          statusText: response.statusText,
-          errorData,
-        });
+        log.error(`Save failed with status ${response.status}`, { status: response.status, errorData });
 
         if (response.status === 500) {
+          // Check if it's a timeout error
+          if (errorData.message?.includes('timeout') || errorData.message?.includes('Connection terminated')) {
+            log.warn('Database connection timeout - entries not saved', { errorData });
+            throw new Error('Database connection timeout. Please try again.');
+          }
           // Check if it's a database configuration issue
           if (errorData.error === 'Database not configured' || errorData.code === 'DATABASE_NOT_CONFIGURED') {
-            console.warn('[historyService] Database not configured, entries not saved');
+            log.warn('Database not configured, entries not saved');
             return;
           }
           // For other 500 errors, throw so caller can handle
@@ -166,9 +178,9 @@ export const historyService = {
       }
 
       const result = await response.json();
-      console.log(`[historyService] ✅ Successfully saved entries:`, result);
+      log.info(`Successfully saved entries`, { saved: result.saved, skipped: result.skipped });
     } catch (error) {
-      console.error('[historyService] Failed to save entries:', error);
+      log.error('Failed to save entries', {}, error as Error);
       // Don't throw - allow app to continue working even if save fails
       throw error; // But let caller know it failed
     }
@@ -191,7 +203,7 @@ export const historyService = {
       const data = await response.json();
       return data.exists === true;
     } catch (error) {
-      console.error('[historyService] Failed to check audio exists:', error);
+      log.error('Failed to check audio exists', {}, error as Error);
       return false;
     }
   },
@@ -206,21 +218,21 @@ export const historyService = {
       if (!response.ok) {
         if (response.status === 404) {
           // Audio not found - entry might not have audio yet
-          console.log(`[historyService] Audio not found for entry ${entryId}`);
+          log.debug(`Audio not found for entry ${entryId}`);
           return null;
         }
         if (response.status === 500) {
-          console.warn('[historyService] Database not configured');
+          log.warn('Database not configured');
           return null;
         }
         throw new Error(`Failed to fetch audio: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log(`[historyService] ✅ Successfully fetched audio for entry ${entryId}`);
+      log.info(`Successfully fetched audio for entry ${entryId}`);
       return data.audioData || null;
     } catch (error) {
-      console.error('[historyService] Failed to fetch audio:', error);
+      log.error('Failed to fetch audio', {}, error as Error);
       return null;
     }
   },
@@ -238,15 +250,15 @@ export const historyService = {
 
       if (!response.ok) {
         if (response.status === 500) {
-          console.warn('[historyService] Database not configured, audio not saved');
+          log.warn('Database not configured, audio not saved');
           return;
         }
         throw new Error('Failed to save audio');
       }
 
-      console.log(`[historyService] ✅ Successfully saved audio for entry ${entryId}`);
+      log.info(`Successfully saved audio for entry ${entryId}`);
     } catch (error) {
-      console.error('[historyService] Failed to save audio:', error);
+      log.error('Failed to save audio', {}, error as Error);
       // Don't throw - audio save failure shouldn't break the app
     }
   },
@@ -260,13 +272,13 @@ export const historyService = {
 
       if (!response.ok) {
         if (response.status === 500) {
-          console.warn('Database not configured, entry not deleted');
+          log.warn('Database not configured, entry not deleted');
           return;
         }
         throw new Error('Failed to delete entry');
       }
     } catch (error) {
-      console.error('Failed to delete entry:', error);
+      log.error('Failed to delete entry', {}, error as Error);
       throw error;
     }
   },
@@ -280,13 +292,13 @@ export const historyService = {
 
       if (!response.ok) {
         if (response.status === 500) {
-          console.warn('Database not configured, entries not deleted');
+          log.warn('Database not configured, entries not deleted');
           return;
         }
         throw new Error('Failed to delete entries');
       }
     } catch (error) {
-      console.error('Failed to delete all entries:', error);
+      log.error('Failed to delete all entries', {}, error as Error);
       throw error;
     }
   },
@@ -304,7 +316,7 @@ export const historyService = {
       const { preferences } = await response.json();
       return preferences;
     } catch (error) {
-      console.error('Failed to fetch preferences:', error);
+      log.error('Failed to fetch preferences', {}, error as Error);
       return null;
     }
   },
@@ -323,13 +335,13 @@ export const historyService = {
       if (!response.ok) {
         if (response.status === 500) {
           // Database not configured, silently fail
-          console.warn('Database not configured, preferences not saved');
+          log.warn('Database not configured, preferences not saved');
           return;
         }
         throw new Error('Failed to save preferences');
       }
     } catch (error) {
-      console.error('Failed to save preferences:', error);
+      log.error('Failed to save preferences', {}, error as Error);
       // Don't throw - allow app to continue
     }
   },

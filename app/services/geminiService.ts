@@ -1,6 +1,9 @@
 
 import { GoogleGenAI, Chat, Modality, Type } from "@google/genai";
 import { HistoryEntry, ChatMessage, Mood } from "../types";
+import logger from "../utils/logger";
+
+const log = logger.module('GeminiService');
 
 const SYSTEM_INSTRUCTION = `
 You are "Serenity," a compassionate journaling companion. Your expertise lies in empathetic reflection and pattern recognition across a user's mental wellness journey.
@@ -23,17 +26,11 @@ const MAX_CONTEXT_TOKENS_REFLECTION = 2500;
 const MAX_CONTEXT_TOKENS_CHAT = 1500;
 const DAYS_RECENT = 3; // Entries within this many days use full text
 const DAYS_MEDIUM = 14; // Entries within this many days use summaries
-const RECENCY_WEIGHT = 0.2;
-const MOOD_WEIGHT = 0.3;
-const TOPIC_WEIGHT = 0.4; // Highest weight - topics are very important for context
-const SIMILARITY_WEIGHT = 0.1;
-const MIN_RELEVANCE_SCORE = 0.35; // Minimum relevance score to include entry (filters out irrelevant entries)
-
-// Dynamic weights for same-day entries (when multiple entries exist on the same day)
-const SAME_DAY_RECENCY_WEIGHT = 0.1; // Reduced recency weight for same-day entries
-const SAME_DAY_TOPIC_WEIGHT = 0.5; // Increased topic weight for same-day entries
-const SAME_DAY_MOOD_WEIGHT = 0.25;
-const SAME_DAY_SIMILARITY_WEIGHT = 0.15;
+// Single vector + emotion metadata architecture
+const SEMANTIC_WEIGHT = 0.75; // Semantic similarity weight (75%)
+const MOOD_WEIGHT = 0.25; // Mood/emotion metadata weight (25%)
+const MIN_RELEVANCE_SCORE = 0.3; // Minimum relevance score to include entry
+const RE_RANK_TOP_K = 20; // Top K entries to re-rank (lightweight post-filter)
 
 // Rough token estimation (4 chars ≈ 1 token for English text)
 function estimateTokens(text: string): number {
@@ -48,177 +45,223 @@ function daysBetween(date1: string, date2: Date = new Date()): number {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 }
 
-// Mood similarity scoring
-function getMoodScore(currentMood: Mood, entryMood: Mood): number {
-  if (currentMood === 'none' || entryMood === 'none') return 0.5; // Neutral if no mood selected
 
+// Embedding cache for performance (in-memory cache of embeddings)
+// Key: entry text (normalized), Value: embedding vector
+const embeddingCache = new Map<string, number[]>();
+
+// Generate embedding for text using Gemini API
+async function generateEmbedding(text: string): Promise<number[]> {
+  // Normalize text for cache key
+  const cacheKey = text.trim().toLowerCase();
+
+  // Check cache first
+  if (embeddingCache.has(cacheKey)) {
+    return embeddingCache.get(cacheKey)!;
+  }
+
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    log.warn('No API key available, falling back to keyword similarity');
+    throw new Error('API key required for embeddings');
+  }
+
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+
+    // Use Gemini embedding model (text-embedding-004)
+    // The API uses 'contents' (plural) and returns 'embeddings' (plural)
+    const result = await ai.models.embedContent({
+      model: 'text-embedding-004',
+      contents: [{ text: text.trim() }],
+    });
+
+    // Extract embedding from result (first embedding from the array)
+    const embedding = result.embeddings?.[0]?.values;
+
+    if (!embedding) {
+      throw new Error('No embedding returned from API');
+    }
+
+    // Cache the embedding
+    embeddingCache.set(cacheKey, embedding);
+
+    // Limit cache size to prevent memory issues (keep last 100 embeddings)
+    if (embeddingCache.size > 100) {
+      const firstKey = embeddingCache.keys().next().value;
+      if (firstKey) {
+        embeddingCache.delete(firstKey);
+      }
+    }
+
+    return embedding;
+  } catch (error) {
+    log.error('Error generating embedding', {}, error as Error);
+    throw error;
+  }
+}
+
+// Calculate cosine similarity between two embedding vectors
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  if (vecA.length !== vecB.length) {
+    throw new Error('Embedding vectors must have the same length');
+  }
+
+  // Dot product
+  let dotProduct = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+  }
+
+  // Calculate norms
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+  normA = Math.sqrt(normA);
+  normB = Math.sqrt(normB);
+
+  // Cosine similarity (0-1, where 1 = identical meaning)
+  if (normA === 0 || normB === 0) {
+    return 0;
+  }
+  return dotProduct / (normA * normB);
+}
+
+// Calculate mood similarity score using emotion metadata
+function calculateMoodSimilarity(currentMood: Mood, entryMood: Mood): number {
+  // Exact match
   if (currentMood === entryMood) return 1.0;
 
-  // Mood groups with similar emotional states
-  const moodGroups = [
-    ['calm', 'reflective'],
-    ['joyful', 'calm'],
-    ['anxious', 'heavy'],
-    ['tired', 'heavy'],
-    ['reflective', 'calm'],
+  // Mood similarity groups (emotionally related moods)
+  const moodGroups: Record<Mood, Mood[]> = {
+    'calm': ['reflective', 'none'],
+    'joyful': ['reflective'],
+    'anxious': ['tired', 'heavy'],
+    'tired': ['anxious', 'heavy', 'none'],
+    'reflective': ['calm', 'joyful', 'none'],
+    'heavy': ['anxious', 'tired'],
+    'none': ['calm', 'reflective', 'tired']
+  };
+
+  // Check if moods are in the same emotional group
+  const currentGroup = moodGroups[currentMood] || [];
+  if (currentGroup.includes(entryMood)) {
+    return 0.6; // Related mood
+  }
+
+  // Opposite moods (less relevant)
+  const oppositePairs: [Mood, Mood][] = [
+    ['joyful', 'heavy'],
+    ['joyful', 'anxious'],
+    ['calm', 'anxious'],
+    ['calm', 'heavy']
   ];
 
-  // Check if moods are in same group
-  for (const group of moodGroups) {
-    if (group.includes(currentMood) && group.includes(entryMood)) {
-      return 0.7;
+  for (const [mood1, mood2] of oppositePairs) {
+    if ((currentMood === mood1 && entryMood === mood2) ||
+      (currentMood === mood2 && entryMood === mood1)) {
+      return 0.2; // Opposite mood
     }
   }
 
-  // Opposite moods (transitions are also interesting)
-  const transitions: [Mood, Mood][] = [
-    ['anxious', 'calm'],
-    ['heavy', 'joyful'],
-    ['tired', 'calm'],
-  ];
-
-  for (const [m1, m2] of transitions) {
-    if ((currentMood === m1 && entryMood === m2) || (currentMood === m2 && entryMood === m1)) {
-      return 0.6; // Transitions are valuable context
-    }
-  }
-
-  return 0.3; // Unrelated moods
+  // Neutral similarity
+  return 0.4;
 }
 
-// Simple keyword/content similarity (basic implementation)
-// For a production app, you'd use embeddings, but this works reasonably well
-function getContentSimilarity(currentEntry: string, entryText: string): number {
-  const currentWords = new Set(currentEntry.toLowerCase().split(/\s+/).filter(w => w.length > 3));
-  const entryWords = new Set(entryText.toLowerCase().split(/\s+/).filter(w => w.length > 3));
-
-  if (currentWords.size === 0) return 0.5;
-
-  const intersection = new Set([...currentWords].filter(x => entryWords.has(x)));
-  return intersection.size / currentWords.size;
-}
-
-// Recency scoring (exponential decay - more recent = higher score)
-function getRecencyScore(daysAgo: number): number {
-  if (daysAgo <= 1) return 1.0;
-  if (daysAgo <= 3) return 0.9;
-  if (daysAgo <= 7) return 0.7;
-  if (daysAgo <= 14) return 0.5;
-  if (daysAgo <= 30) return 0.3;
-  return 0.1;
-}
-
-// Topic similarity scoring
-function getTopicScore(currentTopic: string | undefined, entryTopic: string | undefined): number {
-  // If no topics, neutral score
-  if (!currentTopic && !entryTopic) return 0.5;
-  if (!currentTopic || !entryTopic) return 0.3; // Partial match is less relevant
-
-  const current = currentTopic.toLowerCase().trim();
-  const entry = entryTopic.toLowerCase().trim();
-
-  // Exact match
-  if (current === entry) return 1.0;
-
-  // Check if one topic contains the other (e.g., "work stress" vs "work")
-  if (current.includes(entry) || entry.includes(current)) {
-    return 0.8; // Strong similarity
-  }
-
-  // Check for word overlap (e.g., "work relationships" vs "work life")
-  const currentWords = new Set(current.split(/\s+/));
-  const entryWords = new Set(entry.split(/\s+/));
-  const intersection = new Set([...currentWords].filter(x => entryWords.has(x)));
-
-  if (intersection.size > 0) {
-    // Calculate overlap ratio
-    const unionSize = new Set([...currentWords, ...entryWords]).size;
-    return 0.5 + (intersection.size / unionSize) * 0.3; // Between 0.5 and 0.8
-  }
-
-  // No similarity
-  return 0.2;
-}
-
-// Calculate relevance score and reasons for an entry
+// Calculate relevance score using single vector + emotion metadata
 function calculateRelevanceScore(
-  currentEntry: string,
+  currentEmbedding: number[] | null,
+  entryEmbedding: number[] | null,
   currentMood: Mood,
-  currentTopic: string | undefined,
-  historyEntry: HistoryEntry,
-  isSameDay: boolean = false // Whether this entry is from the same day as current entry
+  entryMood: Mood
 ): { score: number; reasons: string[] } {
-  const daysAgo = daysBetween(historyEntry.timestamp);
-  const recencyScore = getRecencyScore(daysAgo);
-  const moodScore = getMoodScore(currentMood, historyEntry.mood);
-  const topicScore = getTopicScore(currentTopic, historyEntry.topic);
-  const contentScore = getContentSimilarity(currentEntry, historyEntry.text);
-
-  // Use dynamic weights based on whether entries are from the same day
-  // When entries are from the same day, prioritize topic similarity over recency
-  let finalScore: number;
-  if (isSameDay) {
-    // Same-day entries: topic and content similarity matter more than recency
-    // Penalize entries with different topics more heavily when they're from the same day
-    let adjustedTopicScore = topicScore;
-
-    // Strong penalty for different topics when entries are from the same day
-    if (currentTopic && historyEntry.topic && topicScore < 0.5) {
-      adjustedTopicScore = topicScore * 0.5; // Halve the score for different topics on same day
+  // Semantic similarity from single vector
+  let semanticScore = 0.5; // Default neutral score
+  if (currentEmbedding && entryEmbedding) {
+    try {
+      semanticScore = cosineSimilarity(currentEmbedding, entryEmbedding);
+    } catch (error) {
+      log.warn('Error calculating semantic similarity', {}, error as Error);
     }
-
-    finalScore = (
-      recencyScore * SAME_DAY_RECENCY_WEIGHT +
-      moodScore * SAME_DAY_MOOD_WEIGHT +
-      adjustedTopicScore * SAME_DAY_TOPIC_WEIGHT +
-      contentScore * SAME_DAY_SIMILARITY_WEIGHT
-    );
-  } else {
-    // Different days: use standard weights
-    finalScore = (
-      recencyScore * RECENCY_WEIGHT +
-      moodScore * MOOD_WEIGHT +
-      topicScore * TOPIC_WEIGHT +
-      contentScore * SIMILARITY_WEIGHT
-    );
   }
 
-  // Build reasons array to explain why this entry is relevant
+  // Mood similarity from emotion metadata
+  const moodScore = calculateMoodSimilarity(currentMood, entryMood);
+
+  // Weighted combination: semantic (75%) + mood (25%)
+  const finalScore = (
+    semanticScore * SEMANTIC_WEIGHT +
+    moodScore * MOOD_WEIGHT
+  );
+
+  // Build reasons array
   const reasons: string[] = [];
 
-  if (daysAgo <= 3) {
-    if (daysAgo === 0) {
-      reasons.push('same day');
-    } else {
-      reasons.push('recent');
-    }
-  }
-
-  // Topic reasons (more important for same-day entries)
-  if (topicScore >= 0.8 && currentTopic && historyEntry.topic) {
-    reasons.push('same topic');
-  } else if (topicScore >= 0.5 && currentTopic && historyEntry.topic) {
-    reasons.push('related topic');
-  } else if (currentTopic && historyEntry.topic && topicScore < 0.3) {
-    // Different topic - mark it (especially important for same-day filtering)
-    if (isSameDay) {
-      reasons.push('different topic'); // This helps filter out same-day entries with different topics
-    }
-  }
-
-  if (moodScore >= 0.7 && currentMood !== 'none' && historyEntry.mood !== 'none') {
-    reasons.push('similar mood');
-  }
-  if (contentScore >= 0.3) {
+  if (semanticScore >= 0.7) {
+    reasons.push('very similar content');
+  } else if (semanticScore >= 0.5) {
     reasons.push('similar content');
+  } else if (semanticScore >= 0.3) {
+    reasons.push('somewhat similar content');
   }
 
-  // If no specific reasons but score is decent, just note it's relevant
+  if (moodScore >= 0.8) {
+    reasons.push('same mood');
+  } else if (moodScore >= 0.6) {
+    reasons.push('related mood');
+  }
+
   if (reasons.length === 0 && finalScore >= 0.4) {
-    reasons.push('relevant');
+    reasons.push('semantically relevant');
   }
 
   return { score: finalScore, reasons };
+}
+
+// Lightweight re-ranking: boost recent entries and entries with topic matches
+function reRankEntries(
+  scoredEntries: Array<{ entry: HistoryEntry; score: number; relevanceReasons?: string[] }>,
+  currentTopic: string | undefined
+): Array<{ entry: HistoryEntry; score: number; relevanceReasons?: string[] }> {
+  const now = new Date();
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+
+  return scoredEntries.map(scored => {
+    let adjustedScore = scored.score;
+
+    // Recency boost: entries from last 7 days get a small boost
+    const entryDate = new Date(scored.entry.timestamp);
+    entryDate.setHours(0, 0, 0, 0);
+    const daysAgo = Math.ceil((now.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (daysAgo <= 7) {
+      // Boost decreases with age: 7 days = +0.05, 0 days = +0.15
+      const recencyBoost = 0.15 - (daysAgo / 7) * 0.10;
+      adjustedScore = Math.min(1.0, scored.score + recencyBoost);
+    }
+
+    // Topic match boost: if topics match, add small boost
+    if (currentTopic && scored.entry.topic) {
+      const currentTopicLower = currentTopic.toLowerCase().trim();
+      const entryTopicLower = scored.entry.topic.toLowerCase().trim();
+
+      if (currentTopicLower === entryTopicLower) {
+        adjustedScore = Math.min(1.0, adjustedScore + 0.1); // Exact topic match
+      } else if (currentTopicLower.includes(entryTopicLower) || entryTopicLower.includes(currentTopicLower)) {
+        adjustedScore = Math.min(1.0, adjustedScore + 0.05); // Partial topic match
+      }
+    }
+
+    return {
+      entry: scored.entry,
+      score: adjustedScore,
+      relevanceReasons: scored.relevanceReasons
+    };
+  });
 }
 
 // Format entry for context (uses summary for older entries to save tokens)
@@ -280,37 +323,51 @@ interface ContextEntry {
   relevanceReasons?: string[];
 }
 
-function selectRelevantContext(
+async function selectRelevantContext(
   currentEntry: string,
   currentMood: Mood,
   currentTopic: string | undefined,
   history: HistoryEntry[],
   maxTokens: number,
   includeReflection: boolean = false
-): string {
+): Promise<string> {
   if (history.length === 0) {
     return "No previous history available.";
   }
 
-  // Determine if entries are from today (same day as current entry)
-  // This helps prioritize topic similarity for same-day entries
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // STEP 1: Generate single embedding for current entry
+  let currentEmbedding: number[] | null = null;
+  try {
+    currentEmbedding = await generateEmbedding(currentEntry);
+    log.debug('Generated single embedding for current entry');
+  } catch (error) {
+    log.warn('Failed to generate embedding for current entry', {}, error as Error);
+  }
 
-  // Score all entries with relevance reasons
-  const scoredEntries: ContextEntry[] = history.map(entry => {
-    // Check if this entry is from today (for same-day scoring logic)
-    // When entries are from the same day, topic similarity becomes more important
-    const entryDate = new Date(entry.timestamp);
-    entryDate.setHours(0, 0, 0, 0);
-    const isSameDay = entryDate.getTime() === today.getTime();
+  // STEP 2: Generate single embeddings for history entries in parallel
+  const embeddingPromises = history.map(async (entry) => {
+    try {
+      return await generateEmbedding(entry.text);
+    } catch (error) {
+      log.warn('Failed to generate embedding for entry', { entryId: entry.id });
+      return null;
+    }
+  });
 
+  const historyEmbeddings = await Promise.all(embeddingPromises);
+  const successfulCount = historyEmbeddings.filter(e => e !== null).length;
+  log.debug('Generated embeddings for history entries', {
+    successful: successfulCount,
+    total: history.length
+  });
+
+  // STEP 3: Calculate initial relevance scores (single vector + emotion metadata)
+  const scoredEntries = history.map((entry, index) => {
     const { score, reasons } = calculateRelevanceScore(
-      currentEntry,
+      currentEmbedding,
+      historyEmbeddings[index],
       currentMood,
-      currentTopic,
-      entry,
-      isSameDay
+      entry.mood || 'none'
     );
     return {
       entry,
@@ -320,41 +377,40 @@ function selectRelevantContext(
     };
   });
 
-  // Filter out entries below minimum relevance threshold (unless very recent)
-  const recentThreshold = 1; // Always include entries from last day regardless of score
-  const filteredEntries = scoredEntries.filter(scored => {
-    const daysAgo = daysBetween(scored.entry.timestamp);
-    // Include if: meets minimum score OR is very recent (within 1 day)
-    return scored.score >= MIN_RELEVANCE_SCORE || daysAgo <= recentThreshold;
+  // STEP 4: Filter by minimum relevance threshold
+  let filteredEntries = scoredEntries.filter(scored => {
+    return scored.score >= MIN_RELEVANCE_SCORE;
   });
 
   if (filteredEntries.length === 0) {
-    // If no entries meet threshold, use the most recent one
-    const mostRecent = scoredEntries.sort((a, b) => {
-      const dateA = new Date(a.entry.timestamp).getTime();
-      const dateB = new Date(b.entry.timestamp).getTime();
-      return dateB - dateA;
-    })[0];
-    if (mostRecent) {
-      filteredEntries.push(mostRecent);
+    // If no entries meet threshold, use the highest scoring one
+    const highestScoring = scoredEntries.sort((a, b) => b.score - a.score)[0];
+    if (highestScoring) {
+      filteredEntries.push(highestScoring);
     }
   }
 
-  // Calculate tokens for each entry
-  filteredEntries.forEach(scored => {
-    scored.tokens = estimateTokens(
-      formatEntryForContext(scored.entry, includeReflection, scored.score, scored.relevanceReasons)
-    );
-  });
-
-  // Sort by relevance score (highest first)
+  // STEP 5: Lightweight re-ranking (post-filter)
+  // Sort by score, take top K, then re-rank with recency and topic boosts
   filteredEntries.sort((a, b) => b.score - a.score);
+  const topKEntries = filteredEntries.slice(0, RE_RANK_TOP_K);
+  const reRankedEntries = reRankEntries(topKEntries, currentTopic);
 
-  // Select entries that fit within token limit
+  // Re-sort after re-ranking
+  reRankedEntries.sort((a, b) => b.score - a.score);
+
+  // STEP 6: Calculate tokens and select entries within limit
+  const entriesWithTokens = reRankedEntries.map(scored => ({
+    ...scored,
+    tokens: estimateTokens(
+      formatEntryForContext(scored.entry, includeReflection, scored.score, scored.relevanceReasons)
+    )
+  }));
+
   const selected: ContextEntry[] = [];
   let totalTokens = 0;
 
-  for (const scored of filteredEntries) {
+  for (const scored of entriesWithTokens) {
     // Check if we have room
     if (totalTokens + scored.tokens > maxTokens) {
       // Try to fit a shorter version (summary only)
@@ -384,10 +440,19 @@ function selectRelevantContext(
   }
 
   // Log context selection for debugging
-  console.log(`[Context] Selected ${selected.length} of ${history.length} entries (${totalTokens} tokens)`);
+  log.debug('Selected context entries', {
+    selected: selected.length,
+    total: history.length,
+    tokens: totalTokens
+  });
   selected.forEach((scored, idx) => {
     const dateStr = new Date(scored.entry.timestamp).toLocaleDateString();
-    console.log(`[Context ${idx + 1}] ${dateStr} - Score: ${(scored.score * 100).toFixed(0)}% - Reasons: ${scored.relevanceReasons?.join(', ') || 'none'}`);
+    log.debug(`Context entry ${idx + 1}`, {
+      date: dateStr,
+      score: `${(scored.score * 100).toFixed(0)}%`,
+      reasons: scored.relevanceReasons?.join(', ') || 'none',
+      entryId: scored.entry.id
+    });
   });
 
   // Sort selected entries by date (most recent last, to show progression)
@@ -419,36 +484,163 @@ const getApiKey = (): string => {
   return process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
 };
 
+export const detectMood = async (entry: string): Promise<Mood> => {
+  const entryLength = entry.trim().length;
+  log.debug('Mood detection called', { entryLength });
+
+  if (!entry.trim() || entryLength < 15) {
+    log.debug('Entry too short for mood detection, defaulting to none', { entryLength });
+    return 'none'; // Need minimum text to detect mood
+  }
+
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    log.warn('No API key available for mood detection, defaulting to none');
+    return 'none'; // Fail silently if no API key
+  }
+
+  log.debug('Starting mood detection');
+  const ai = new GoogleGenAI({ apiKey });
+
+  const moodDetectionPrompt = `Analyze this journal entry and identify the emotional mood or state.
+
+Available moods:
+- "calm" - peaceful, relaxed, serene
+- "joyful" - happy, excited, positive, grateful
+- "anxious" - worried, nervous, stressed, overwhelmed
+- "tired" - exhausted, drained, fatigued
+- "reflective" - thoughtful, contemplative, introspective
+- "heavy" - sad, burdened, melancholic, down
+- "none" - neutral, unclear, or mixed emotions
+
+Guidelines:
+- Return ONE mood that best represents the overall emotional tone
+- Focus on the dominant emotional state
+- If truly neutral or unclear, return "none"
+- Be sensitive to emotional nuances
+
+Journal entry:
+"${entry.trim()}"
+
+Identify the mood:`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: moodDetectionPrompt,
+      config: {
+        temperature: 0.5, // Lower temperature for more consistent mood detection
+        maxOutputTokens: 20,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            mood: {
+              type: Type.STRING,
+              description: "The emotional mood: calm, joyful, anxious, tired, reflective, heavy, or none"
+            },
+            confidence: {
+              type: Type.STRING,
+              description: "high, medium, or low - how clear the mood is"
+            }
+          },
+          required: ["mood"]
+        }
+      },
+    });
+
+    let detectedMood: Mood = 'none';
+    const responseText = response.text || '';
+    log.debug('Mood detection API response', { responseLength: responseText.length, preview: responseText.substring(0, 100) });
+
+    try {
+      const moodData = JSON.parse(responseText);
+      const rawMood = (moodData.mood || '').toLowerCase().trim();
+      const confidence = moodData.confidence || 'medium';
+
+      log.debug('Parsed mood data', { rawMood, confidence, moodData });
+
+      // Validate mood is one of the allowed values
+      const validMoods: Mood[] = ['calm', 'joyful', 'anxious', 'tired', 'reflective', 'heavy', 'none'];
+      if (validMoods.includes(rawMood as Mood)) {
+        detectedMood = rawMood as Mood;
+        log.info('Mood detected successfully', { mood: detectedMood, confidence });
+      } else {
+        log.warn('Invalid mood detected, defaulting to none', { detectedMood: rawMood, validMoods });
+      }
+    } catch (parseError) {
+      log.warn('JSON parse failed, trying text extraction', { error: parseError, responseText: responseText.substring(0, 200) });
+      // Fallback: try to extract mood from text response
+      const textResponse = responseText.toLowerCase().trim();
+      const validMoods: Mood[] = ['calm', 'joyful', 'anxious', 'tired', 'reflective', 'heavy'];
+      for (const mood of validMoods) {
+        if (textResponse.includes(mood)) {
+          detectedMood = mood;
+          log.info('Extracted mood from text response', { mood: detectedMood });
+          break;
+        }
+      }
+      if (detectedMood === 'none') {
+        log.warn('Could not parse mood from response', { response: textResponse.substring(0, 200) });
+      }
+    }
+
+    return detectedMood;
+  } catch (error) {
+    log.error('Mood detection error', {}, error as Error);
+    return 'none'; // Fail silently, default to 'none'
+  }
+};
+
 export const getJournalReflection = async (
   entry: string,
   mood: string,
   history: HistoryEntry[]
-): Promise<{ reflection: string; summary: string; topic?: string }> => {
+): Promise<{ reflection: string; summary: string; topic?: string; mood?: Mood }> => {
   const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured. Please set NEXT_PUBLIC_GEMINI_API_KEY in your .env.local file');
   }
   const ai = new GoogleGenAI({ apiKey });
 
+  // Always auto-detect mood (ignore user-selected mood, use AI detection)
+  let finalMood: Mood = 'none';
+  try {
+    log.debug('Auto-detecting mood for entry', { entryLength: entry.length });
+    const detectedMood = await detectMood(entry);
+    if (detectedMood && detectedMood !== 'none') {
+      finalMood = detectedMood;
+      log.info('Mood detected for reflection', { mood: finalMood });
+    } else {
+      log.debug('No mood detected, using none', { detectedMood });
+      finalMood = 'none';
+    }
+  } catch (moodError) {
+    log.error('Mood detection error during reflection', {}, moodError as Error);
+    // Fallback to 'none' if detection fails
+    finalMood = 'none';
+  }
+
   // Detect topic FIRST so we can use it for better context selection
   let detectedTopic: string | undefined;
   try {
-    console.log('[getJournalReflection] Detecting topic for entry...');
+    log.debug('Detecting topic for entry');
     detectedTopic = await detectTopic(entry);
     if (detectedTopic) {
-      console.log(`[getJournalReflection] ✅ Topic detected: "${detectedTopic}"`);
+      log.info('Topic detected for reflection', { topic: detectedTopic });
     } else {
-      console.log('[getJournalReflection] ⚠️ No topic detected (entry may be too short or topic unclear)');
+      log.debug('No topic detected (entry may be too short or topic unclear)');
     }
   } catch (topicError) {
-    console.error("[getJournalReflection] Topic detection error:", topicError);
+    log.error('Topic detection error during reflection', {}, topicError as Error);
     // Continue without topic if detection fails
   }
 
-  // Use improved context selection with topic
-  const historyContext = selectRelevantContext(
+  // Use improved context selection with topic (now async with embeddings)
+  // Use detected mood for better context selection
+  const historyContext = await selectRelevantContext(
     entry,
-    mood as Mood,
+    finalMood,
     detectedTopic,
     history,
     MAX_CONTEXT_TOKENS_REFLECTION,
@@ -468,7 +660,6 @@ The following entries from the user's journal history have been selected because
 ${historyContext}
 
 ### CURRENT ENTRY
-Mood: ${mood}
 Content: "${entry}"
 
 **IMPORTANT:** 
@@ -479,7 +670,9 @@ Content: "${entry}"
 - If past entries seem unrelated to the current entry, focus entirely on the current entry
 
 Please provide your reflection and a concise summary.
-**Also identify the main topic** (1-3 words) - what is the primary subject matter being discussed?
+**Also identify:**
+1. **The main topic** (1-3 words) - what is the primary subject matter being discussed?
+2. **The emotional mood** - one of: calm, joyful, anxious, tired, reflective, heavy, or none
 `;
 
   try {
@@ -498,9 +691,13 @@ Please provide your reflection and a concise summary.
             topic: {
               type: Type.STRING,
               description: "The main topic or theme (1-3 words) - what is the primary subject matter being discussed? Examples: work stress, family conflict, health anxiety, creative projects, relationship struggles, career planning, etc. Focus on WHAT they're writing about, not emotional state."
+            },
+            mood: {
+              type: Type.STRING,
+              description: "The emotional mood or state: calm (peaceful, relaxed, serene), joyful (happy, excited, positive, grateful), anxious (worried, nervous, stressed, overwhelmed), tired (exhausted, drained, fatigued), reflective (thoughtful, contemplative, introspective), heavy (sad, burdened, melancholic, down), or none (neutral, unclear, or mixed emotions). Return ONE mood that best represents the overall emotional tone."
             }
           },
-          required: ["reflection", "summary", "topic"]
+          required: ["reflection", "summary", "topic", "mood"]
         }
       },
     });
@@ -508,6 +705,32 @@ Please provide your reflection and a concise summary.
     const data = JSON.parse(response.text || "{}");
     const reflectionContent = data.reflection || "I'm processing your thoughts. Thank you for sharing.";
     const summaryContent = data.summary || "A moment of reflection.";
+
+    // Mood from reflection response (most accurate - AI understands full context)
+    let reflectionMood: Mood | undefined;
+    if (data.mood) {
+      const rawMood = (data.mood || '').toLowerCase().trim();
+      const validMoods: Mood[] = ['calm', 'joyful', 'anxious', 'tired', 'reflective', 'heavy', 'none'];
+      if (validMoods.includes(rawMood as Mood)) {
+        reflectionMood = rawMood as Mood;
+        log.info('Mood from reflection response', { mood: reflectionMood });
+      } else {
+        log.warn('Invalid mood from reflection response', { mood: rawMood });
+      }
+    }
+
+    // Use mood from reflection if available, otherwise use detected mood
+    if (reflectionMood && reflectionMood !== 'none') {
+      finalMood = reflectionMood;
+      log.info('Using mood from reflection response', { mood: finalMood });
+    } else if (reflectionMood === 'none') {
+      // AI explicitly said 'none', use it
+      finalMood = 'none';
+      log.debug('Mood from reflection is none');
+    } else {
+      // No mood in reflection response, keep the detected mood
+      log.debug('No mood in reflection response, using detected mood', { detectedMood: finalMood });
+    }
 
     // Topic from reflection response (most accurate - AI understands full context)
     let finalTopic: string | undefined = data.topic;
@@ -535,48 +758,49 @@ Please provide your reflection and a concise summary.
 
     // Fallback to initial topic detection if reflection didn't provide one
     if (!finalTopic || finalTopic.toLowerCase() === 'general' || finalTopic.toLowerCase() === 'none') {
-      console.log('[getJournalReflection] Topic from reflection not available or too generic, using initial detection');
+      log.debug('Topic from reflection not available or too generic, using initial detection');
       finalTopic = detectedTopic;
 
       // If still no topic, try detecting from reflection text as last resort
       if (!finalTopic) {
         try {
-          console.log('[getJournalReflection] Attempting topic detection from reflection text...');
+          log.debug('Attempting topic detection from reflection text');
           const reflectionTopic = await detectTopic(reflectionContent);
           if (reflectionTopic) {
             finalTopic = reflectionTopic;
-            console.log(`[getJournalReflection] ✅ Topic detected from reflection text: "${finalTopic}"`);
+            log.info('Topic detected from reflection text', { topic: finalTopic });
           }
         } catch (error) {
-          console.warn('[getJournalReflection] Failed to detect topic from reflection text:', error);
+          log.warn('Failed to detect topic from reflection text', {}, error as Error);
         }
       }
     } else {
-      console.log(`[getJournalReflection] ✅ Topic from reflection response: "${finalTopic}"`);
+      log.info('Topic from reflection response', { topic: finalTopic });
     }
 
     if (!finalTopic) {
-      console.log('[getJournalReflection] ⚠️ No topic could be determined');
+      log.debug('No topic could be determined');
     }
 
     return {
       reflection: reflectionContent,
       summary: summaryContent,
-      topic: finalTopic
+      topic: finalTopic,
+      mood: finalMood
     };
   } catch (error) {
-    console.error("Gemini API Error:", error);
+    log.error('Gemini API error during reflection generation', {}, error as Error);
     throw error;
   }
 };
 
-export const startJournalChat = (
+export const startJournalChat = async (
   entry: string,
   initialReflection: string,
   mood: string,
   history: HistoryEntry[],
   currentTopic?: string
-): Chat => {
+): Promise<Chat> => {
   const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured. Please set NEXT_PUBLIC_GEMINI_API_KEY in your .env.local file');
@@ -584,8 +808,8 @@ export const startJournalChat = (
   const ai = new GoogleGenAI({ apiKey });
 
   // Use improved context selection for chat (more focused, less tokens)
-  // Use topic from the current reflection for better context
-  const historyContext = selectRelevantContext(
+  // Use topic from the current reflection for better context (now async with embeddings)
+  const historyContext = await selectRelevantContext(
     entry,
     mood as Mood,
     currentTopic,
@@ -627,20 +851,21 @@ function cleanTextForTTS(text: string): string {
 }
 
 export const detectTopic = async (entry: string): Promise<string | undefined> => {
-  console.log(`[detectTopic] Called with entry length: ${entry.trim().length}`);
+  const entryLength = entry.trim().length;
+  log.debug('Topic detection called', { entryLength });
 
-  if (!entry.trim() || entry.trim().length < 15) {
-    console.log(`[detectTopic] Entry too short (${entry.trim().length} chars), skipping topic detection`);
+  if (!entry.trim() || entryLength < 15) {
+    log.debug('Entry too short for topic detection', { entryLength });
     return undefined; // Need minimum text to detect topic
   }
 
   const apiKey = getApiKey();
   if (!apiKey) {
-    console.warn('[detectTopic] No API key available, skipping topic detection');
+    log.warn('No API key available for topic detection');
     return undefined; // Fail silently if no API key
   }
 
-  console.log('[detectTopic] Starting topic detection...');
+  log.debug('Starting topic detection');
   const ai = new GoogleGenAI({ apiKey });
 
   // Improved prompt with better examples and clearer instructions
@@ -706,15 +931,15 @@ Identify the main topic:`;
       const topicData = JSON.parse(response.text || '{}');
       detectedTopic = topicData.topic || response.text || '';
       const confidence = topicData.confidence || 'medium';
-      console.log(`[detectTopic] Topic detected with ${confidence} confidence: "${detectedTopic}"`);
+      log.info('Topic detected', { topic: detectedTopic, confidence });
     } catch (parseError) {
       // Fallback to text parsing if JSON parsing fails
       detectedTopic = (response.text || '').trim();
-      console.warn('[detectTopic] JSON parse failed, using text response:', detectedTopic);
+      log.warn('JSON parse failed, using text response', { detectedTopic });
     }
 
     if (!detectedTopic) {
-      console.log('[detectTopic] No topic detected in response');
+      log.debug('No topic detected in response');
       return undefined;
     }
 
@@ -731,7 +956,7 @@ Identify the main topic:`;
 
     // Return undefined if empty or too generic
     if (!cleanedTopic || cleanedTopic === 'none' || cleanedTopic === 'general') {
-      console.log(`[detectTopic] Topic filtered out (generic/empty): "${cleanedTopic}"`);
+      log.debug('Topic filtered out (generic/empty)', { cleanedTopic });
       return undefined;
     }
 
@@ -740,10 +965,10 @@ Identify the main topic:`;
       .split(/\s+/)
       .map(word => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
-    console.log(`[detectTopic] Raw: "${detectedTopic}" -> Cleaned: "${finalTopic}"`);
+    log.debug('Topic cleaned', { raw: detectedTopic, cleaned: finalTopic });
     return finalTopic;
   } catch (error) {
-    console.error("Topic detection error:", error);
+    log.error('Topic detection error', {}, error as Error);
     return undefined; // Fail silently
   }
 };
@@ -821,14 +1046,18 @@ async function generateSpeechChunk(
         // Rate limit exceeded - get retry-after header
         const retryAfter = response.headers.get('Retry-After');
         const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : delay * Math.pow(2, attempt);
-        
+
         const isLastAttempt = attempt === retries - 1;
         if (isLastAttempt) {
           const errorData = await response.json().catch(() => ({}));
           throw new Error(errorData.message || 'Rate limit exceeded. Please try again later.');
         }
 
-        console.warn(`[TTS] Rate limit hit, waiting ${waitTime}ms before retry ${attempt + 1}/${retries}`);
+        log.warn('Rate limit hit, waiting before retry', {
+          attempt: attempt + 1,
+          retries,
+          waitTime
+        });
         await new Promise(resolve => setTimeout(resolve, waitTime));
         continue;
       }
@@ -843,7 +1072,7 @@ async function generateSpeechChunk(
     } catch (error: any) {
       const isLastAttempt = attempt === retries - 1;
       if (isLastAttempt) {
-        console.error(`[TTS] Error after ${retries} attempts:`, error);
+        log.error(`TTS error after ${retries} attempts`, { attempt: attempt + 1, retries }, error as Error);
         throw error;
       }
 
@@ -896,11 +1125,11 @@ export const generateSpeech = async (
     // This prevents hitting rate limits when generating multiple chunks
     const results: string[] = [];
     const DELAY_BETWEEN_CHUNKS_MS = 500; // 500ms delay between chunks
-    
+
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
       const chunkHash = chunk.trim().toLowerCase();
-      
+
       // Check if there's already a pending request for this chunk
       const existing = pendingTTSRequests.get(chunkHash);
       if (existing) {
@@ -917,14 +1146,17 @@ export const generateSpeech = async (
       const request = generateSpeechChunk(chunk);
       pendingTTSRequests.set(chunkHash, request);
 
-    try {
+      try {
         const result = await request.finally(() => pendingTTSRequests.delete(chunkHash));
         if (result) results.push(result);
-    } catch (error) {
+      } catch (error) {
         pendingTTSRequests.delete(chunkHash);
         // Continue with other chunks even if one fails
-        console.error(`[TTS] Failed to generate chunk ${i + 1}/${chunks.length}:`, error);
-    }
+        log.error('Failed to generate TTS chunk', {
+          chunk: i + 1,
+          total: chunks.length
+        }, error as Error);
+      }
     }
 
     return results.length > 0 ? results : undefined;

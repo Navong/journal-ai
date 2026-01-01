@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/app/auth';
 import { prisma } from '@/app/utils/prisma';
+import logger from '@/app/utils/logger';
+
+const log = logger;
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -22,7 +25,7 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '0'); // 0 = no limit
     const offset = parseInt(searchParams.get('offset') || '0');
 
-    console.log(`[API] GET /api/history - Fetching entries for user: ${userId}${includeAudio ? ' (with audio)' : ''}${limit > 0 ? ` (limit: ${limit}, offset: ${offset})` : ''}`);
+    log.debug(`GET /api/history - Fetching entries for user: ${userId}${includeAudio ? ' (with audio)' : ''}${limit > 0 ? ` (limit: ${limit}, offset: ${offset})` : ''}`);
 
     // Optimize query: exclude audioData by default (it's large), use select for better performance
     // Use composite index (userId, createdAt DESC) for faster queries
@@ -48,7 +51,7 @@ export async function GET(request: NextRequest) {
       ...(limit > 0 && { take: limit, skip: offset }),
     });
 
-    console.log(`[API] Found ${entries.length} entries for user ${userId}`);
+    log.info(`Found ${entries.length} entries for user ${userId}`);
     return NextResponse.json({
       entries,
       ...(limit > 0 && {
@@ -60,8 +63,18 @@ export async function GET(request: NextRequest) {
       })
     });
   } catch (error: any) {
-    console.error(`[API] Failed to fetch history for user ${userId}:`, error);
-    return NextResponse.json({ error: 'Failed to fetch history', message: error.message }, { status: 500 });
+    log.error(`Failed to fetch history for user ${userId}`, { userId }, error);
+    // Check if it's a timeout error
+    const errorMessage = error?.message || 'Unknown error';
+    const isTimeout = errorMessage.includes('timeout') || 
+                      errorMessage.includes('Connection terminated') ||
+                      error?.code === 'ETIMEDOUT' ||
+                      error?.code === 'ECONNRESET';
+    
+    return NextResponse.json({ 
+      error: 'Failed to fetch history', 
+      message: isTimeout ? 'Connection terminated due to connection timeout' : errorMessage 
+    }, { status: 500 });
   }
 }
 
@@ -79,14 +92,14 @@ export async function POST(request: NextRequest) {
   // Extract userId from NextAuth session
   const userId = session.user.id;
 
-  console.log(`[API] POST /api/history - Saving entries for user: ${userId}`);
+  log.debug(`POST /api/history - Saving entries for user: ${userId}`);
 
   try {
     let body: any;
     try {
       body = await request.json();
     } catch (jsonError: any) {
-      console.error('[API] Failed to parse request body:', jsonError);
+      log.error('Failed to parse request body', {}, jsonError as Error);
       return NextResponse.json({
         error: 'Invalid JSON in request body',
         message: jsonError?.message || 'Failed to parse request body'
@@ -96,14 +109,14 @@ export async function POST(request: NextRequest) {
     const { entries } = body;
 
     if (!Array.isArray(entries)) {
-      console.error('[API] Invalid request body - entries is not an array. Received:', typeof entries, entries);
+      log.error('Invalid request body - entries is not an array', { receivedType: typeof entries });
       return NextResponse.json({
         error: 'Invalid request body',
         message: 'entries must be an array'
       }, { status: 400 });
     }
 
-    console.log(`[API] Received ${entries.length} entries to save for user ${userId}`);
+    log.info(`Received ${entries.length} entries to save for user ${userId}`);
 
     // Upsert entries with userId from NextAuth for security
     // We need to check if entry exists and belongs to user before updating
@@ -127,7 +140,7 @@ export async function POST(request: NextRequest) {
             reflectionText: entryData.reflection_text,
             summary: entryData.summary || null,
             topic: entryData.topic || null,
-            mood: entryData.mood || null,
+            mood: entryData.mood ?? null, // Save auto-detected mood (anxious, calm, etc.) or null if 'none'
             audioData: entryData.audio_data || null,
             createdAt: entryData.created_at ? new Date(entryData.created_at) : new Date(),
           },
@@ -136,7 +149,7 @@ export async function POST(request: NextRequest) {
             reflectionText: entryData.reflection_text,
             summary: entryData.summary || null,
             topic: entryData.topic || null,
-            mood: entryData.mood || null,
+            mood: entryData.mood ?? null, // Save auto-detected mood (anxious, calm, etc.) or null if 'none'
             // Only update audioData if it's explicitly provided in the request
             // If audio_data field is missing/undefined, don't update audio field (preserves existing audio)
             // This prevents overwriting audio when syncing from device without audio in memory
@@ -158,26 +171,27 @@ export async function POST(request: NextRequest) {
       if (settled.status === 'fulfilled') {
         const result = settled.value;
         if (result.success) {
-          savedCount++;
-          console.log(`[API] Upserted entry ${result.entryId} for user ${userId}`);
+        savedCount++;
+          log.debug(`Upserted entry ${result.entryId} for user ${userId}`);
         } else {
           skippedCount++;
-          console.warn(`[API] Skipped entry ${result.entryId} - belongs to user ${result.result.userId}, not ${userId}`);
+          log.warn(`Skipped entry ${result.entryId} - belongs to user ${result.result.userId}, not ${userId}`);
         }
       } else {
         const error = settled.reason;
         const errorMessage = error?.message || 'Unknown error';
         const errorCode = error?.code || 'UNKNOWN_ERROR';
         errors.push(`Entry ${entryData.id}: ${errorMessage} (${errorCode})`);
-        console.error(`[API] Error saving entry ${entryData.id} for user ${userId}:`, {
+        log.error(`Error saving entry ${entryData.id} for user ${userId}`, {
+          entryId: entryData.id,
           message: errorMessage,
           code: errorCode,
-        });
+        }, error as Error);
       }
     });
 
     if (errors.length > 0) {
-      console.error(`Failed to save ${errors.length} entries:`, errors);
+      log.error(`Failed to save ${errors.length} entries`, { errors, savedCount, skippedCount });
       return NextResponse.json({
         success: savedCount > 0,
         saved: savedCount,
@@ -187,24 +201,23 @@ export async function POST(request: NextRequest) {
       }, { status: errors.length === entries.length ? 500 : 207 }); // 207 = Multi-Status
     }
 
-    console.log(`Successfully saved ${savedCount} entries for user ${userId}`);
+    log.info(`Successfully saved ${savedCount} entries for user ${userId}`);
     return NextResponse.json({ success: true, saved: savedCount, skipped: skippedCount });
   } catch (error: any) {
-    console.error('[API] Failed to save entries:', error);
-    console.error('[API] Error details:', {
-      message: error?.message,
-      code: error?.code,
-      meta: error?.meta,
-      stack: error?.stack,
-    });
+    log.error('Failed to save entries', { userId }, error);
+    // Check if it's a timeout error
+    const errorMessage = error?.message || 'Unknown error';
+    const isTimeout = errorMessage.includes('timeout') || 
+                      errorMessage.includes('Connection terminated') ||
+                      error?.code === 'ETIMEDOUT' ||
+                      error?.code === 'ECONNRESET';
 
     // Ensure we return a properly serializable error response
-    const errorMessage = error?.message || 'Unknown error';
     const errorCode = error?.code || 'UNKNOWN_ERROR';
 
     return NextResponse.json({
       error: 'Failed to save entries',
-      message: errorMessage,
+      message: isTimeout ? 'Connection terminated due to connection timeout' : errorMessage,
       code: errorCode,
       details: error?.meta ? { meta: error.meta } : undefined,
     }, { status: 500 });
@@ -255,7 +268,7 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Failed to delete entry:', error);
+    log.error('Failed to delete entry', { userId, entryId }, error as Error);
     return NextResponse.json({ error: 'Failed to delete entry' }, { status: 500 });
   }
 }
