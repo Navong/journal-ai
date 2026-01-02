@@ -1126,8 +1126,19 @@ const JournalApp: React.FC = () => {
             if (userId && !isDemoMode && currentHistoryId && typeof audioResult === 'string') {
               optimizeAudio(audioResult)
                 .then(optimized => {
-                  historyService.saveEntryAudio(currentHistoryId, optimized).catch(err => {
-                    console.warn('[JournalApp] Failed to save optimized audio:', err);
+                  // Validate optimized audio before saving
+                  const MIN_VALID_AUDIO_LENGTH = 1000;
+                  const isValidOptimized = optimized && 
+                                           typeof optimized === 'string' && 
+                                           optimized.length >= MIN_VALID_AUDIO_LENGTH;
+                  
+                  const audioToSave = isValidOptimized ? optimized : audioResult;
+                  if (!isValidOptimized && optimized) {
+                    console.warn(`[JournalApp] Optimized audio invalid (length: ${optimized?.length}), using original`);
+                  }
+                  
+                  historyService.saveEntryAudio(currentHistoryId, audioToSave).catch(err => {
+                    console.warn('[JournalApp] Failed to save audio:', err);
                   });
                 })
                 .catch(err => {
@@ -1228,8 +1239,19 @@ const JournalApp: React.FC = () => {
         if (userId && !isDemoMode && historyEntry?.id && typeof audioResult === 'string') {
           optimizeAudio(audioResult)
             .then(optimized => {
-              historyService.saveEntryAudio(historyEntry.id, optimized).catch(err => {
-                console.warn('[JournalApp] Failed to save optimized audio:', err);
+              // Validate optimized audio before saving
+              const MIN_VALID_AUDIO_LENGTH = 1000;
+              const isValidOptimized = optimized && 
+                                       typeof optimized === 'string' && 
+                                       optimized.length >= MIN_VALID_AUDIO_LENGTH;
+              
+              const audioToSave = isValidOptimized ? optimized : audioResult;
+              if (!isValidOptimized && optimized) {
+                console.warn(`[JournalApp] Optimized audio invalid (length: ${optimized?.length}), using original`);
+              }
+              
+              historyService.saveEntryAudio(historyEntry.id, audioToSave).catch(err => {
+                console.warn('[JournalApp] Failed to save audio:', err);
               });
             })
             .catch(err => {
@@ -1428,8 +1450,23 @@ const JournalApp: React.FC = () => {
                 return;
               }
 
-              // Save optimized version if available, otherwise save original
-              const audioToSave = optimized || audioResult;
+              // Validate optimized audio before using it
+              // Audio data should be at least 1000 chars (real audio is much longer)
+              const MIN_VALID_AUDIO_LENGTH = 1000;
+              const isValidOptimized = optimized && 
+                                       typeof optimized === 'string' && 
+                                       optimized.length >= MIN_VALID_AUDIO_LENGTH;
+
+              // Save optimized version if valid, otherwise save original
+              const audioToSave = isValidOptimized ? optimized : audioResult;
+              
+              if (!isValidOptimized && optimized) {
+                console.warn(`[JournalApp] Optimized audio invalid (length: ${optimized?.length}), using original`, {
+                  optimizedLength: optimized?.length,
+                  originalLength: audioResult?.length
+                });
+              }
+
               historyService.saveEntryAudio(newId, audioToSave)
                     .then(() => {
                       console.log(`[JournalApp] ✅ Audio saved to database for entry ${newId}`);

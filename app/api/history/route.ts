@@ -238,9 +238,10 @@ export async function DELETE(request: NextRequest) {
   // Extract userId from NextAuth session
   const userId = session.user.id;
 
+  let entryId: string | null = null;
   try {
     const { searchParams } = new URL(request.url);
-    const entryId = searchParams.get('id');
+    entryId = searchParams.get('id');
     const deleteAll = searchParams.get('all') === 'true';
 
     if (deleteAll) {

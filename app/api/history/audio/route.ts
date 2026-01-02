@@ -115,6 +115,42 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Audio data required' }, { status: 400 });
     }
 
+    // Validate audio data format and length
+    if (typeof audioData !== 'string') {
+      return NextResponse.json({ error: 'Audio data must be a string' }, { status: 400 });
+    }
+
+    // Remove any whitespace
+    const cleanedAudioData = audioData.replace(/\s/g, '');
+
+    // Validate base64 format
+    const base64Regex = /^[A-Za-z0-9+/]+=*$/;
+    if (!base64Regex.test(cleanedAudioData)) {
+      console.error('[API] Invalid base64 format in audio data', {
+        length: cleanedAudioData.length,
+        firstChars: cleanedAudioData.substring(0, 50)
+      });
+      return NextResponse.json({ error: 'Audio data is not valid base64' }, { status: 400 });
+    }
+
+    // Validate minimum length (audio data should be at least 1000 chars base64 = ~750 bytes)
+    // Very short strings like "HFO7a4A=" (8 chars) are clearly invalid
+    const MIN_AUDIO_LENGTH = 1000;
+    if (cleanedAudioData.length < MIN_AUDIO_LENGTH) {
+      console.error('[API] Audio data too short to be valid', {
+        length: cleanedAudioData.length,
+        expectedMin: MIN_AUDIO_LENGTH,
+        data: cleanedAudioData.substring(0, 100)
+      });
+      return NextResponse.json(
+        { 
+          error: 'Audio data is too short to be valid',
+          message: `Audio data must be at least ${MIN_AUDIO_LENGTH} characters, got ${cleanedAudioData.length}`
+        }, 
+        { status: 400 }
+      );
+    }
+
     // Verify entry belongs to user
     const entry = await prisma.journalEntry.findUnique({
       where: { id: entryId },
@@ -129,13 +165,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
-    // Update audio data
+    // Update audio data (use cleaned version)
     await prisma.journalEntry.update({
       where: { id: entryId },
-      data: { audioData },
+      data: { audioData: cleanedAudioData },
     });
 
-    console.log(`[API] ✅ Saved audio for entry ${entryId} (user: ${userId})`);
+    console.log(`[API] ✅ Saved audio for entry ${entryId} (user: ${userId}, size: ${cleanedAudioData.length} chars, ~${Math.round(cleanedAudioData.length * 0.75 / 1024)}KB)`);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error('[API] Failed to save audio:', error);
