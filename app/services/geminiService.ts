@@ -728,15 +728,11 @@ Please provide your reflection and a concise summary.
 **Also identify:**
 1. **The main topic** (1-3 words) - what is the primary subject matter being discussed?
 2. **The emotional mood** - one of: calm, joyful, anxious, tired, reflective, heavy, or none
-3. **Key phrases to highlight** in your reflection text - identify phrases (2-5 words each) that fall into these 4 categories:
+3. **Key phrases to highlight** in your reflection text - identify phrases (2-5 words each) that fall into these 2 categories:
    
-   **a) Somatic Markers** - Physical sensations mentioned (e.g., "jaw is locking up", "knees are throbbing", "feeling shaky", "chest is tight")
+   **a) Somatic Stressor** - Physical symptoms (e.g., "jaw is locking up", "chest is tight", "shoulders tense") AND external triggers (e.g., "Sarah's email", "Miller project", "tight deadline", "team pressure")
    
-   **b) Identity Anchors** - Personal strengths, achievements, or resilience shown (e.g., "pushed through 18 miles", "found your voice", "stayed committed", "showing courage")
-   
-   **c) External Stressors** - Specific people, events, or situations causing stress (e.g., "Sarah's quick sync", "Miller follow-up", "team meeting", "project deadline")
-   
-   **d) Emotional Shifts** - Changes in emotional state or complex emotions (e.g., "cozy melancholy", "incredible relief", "feeling lighter", "sense of peace")
+   **b) Identity Win** - Personal achievements (e.g., "pushed through 18 miles", "completed the marathon"), moments of voice/agency (e.g., "stood your ground", "set a boundary", "spoke up"), and emotional recovery (e.g., "finding peace", "feeling lighter", "regaining balance")
 
 **Important:** Only highlight phrases that appear in YOUR reflection text, not the user's entry. Extract exact phrases (2-5 words) from your own response.
 `;
@@ -780,7 +776,7 @@ Please provide your reflection and a concise summary.
                   },
                   type: {
                     type: Type.STRING,
-                    description: "Category: somatic_marker (physical sensations), identity_anchor (strengths/achievements), external_stressor (people/events causing stress), or emotional_shift (emotion changes)"
+                    description: "Category: somatic_stressor (physical symptoms OR external triggers like people/deadlines), or identity_win (achievements, voice/agency, emotional recovery)"
                   }
                 },
                 required: ["text", "type"]

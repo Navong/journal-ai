@@ -12,11 +12,9 @@ interface HighlightedTextProps {
 
 /**
  * Highlights phrases in reflection text based on AI-detected categories
- * Uses 4 categories for sophisticated visual narrative:
- * 1. Somatic Markers - Physical sensations (red glow)
- * 2. Identity Anchors - Strengths/achievements (gold/yellow)
- * 3. External Stressors - People/events causing stress (grey/purple)
- * 4. Emotional Shifts - Emotion changes (blue/italic)
+ * Uses 2 focused categories for clean visual narrative:
+ * 1. Somatic Stressor - Physical symptoms + external triggers (red underline)
+ * 2. Identity Win - Achievements + voice/agency + emotional recovery (gold highlight)
  * 
  * Also processes markdown syntax (bold, italic, etc.)
  */
@@ -33,21 +31,13 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highl
   // Get style class for each highlight type
   const getStyleForType = (type: HighlightType): string => {
     switch (type) {
-      case 'somatic_marker':
-        // Physical sensations - subtle red underline
-        return 'underline decoration-red-400 decoration-2 underline-offset-2 font-semibold text-stone-900';
+      case 'somatic_stressor':
+        // Physical symptoms + external triggers - soft red glow with underline
+        return 'underline decoration-red-400 decoration-2 underline-offset-2 text-red-900 font-medium bg-red-50/50 px-0.5 rounded';
       
-      case 'identity_anchor':
-        // Strengths/achievements - bold with subtle gold background
-        return 'font-bold bg-amber-50 text-amber-900 px-1 py-0.5 rounded';
-      
-      case 'external_stressor':
-        // External stressors - subtle purple/grey box
-        return 'bg-stone-100 text-stone-800 px-1 py-0.5 rounded border border-stone-200 font-medium';
-      
-      case 'emotional_shift':
-        // Emotional shifts - italic with subtle blue tint
-        return 'italic text-blue-900 font-medium';
+      case 'identity_win':
+        // Achievements + voice + recovery - bold with gold background
+        return 'font-bold bg-amber-50 text-amber-900 px-1 py-0.5 rounded shadow-sm';
       
       default:
         return 'font-semibold';
@@ -57,10 +47,8 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highl
   // Format type label for tooltip
   const formatTypeLabel = (type: HighlightType): string => {
     switch (type) {
-      case 'somatic_marker': return 'Physical sensation';
-      case 'identity_anchor': return 'Personal strength';
-      case 'external_stressor': return 'External stressor';
-      case 'emotional_shift': return 'Emotional shift';
+      case 'somatic_stressor': return 'Somatic Stressor';
+      case 'identity_win': return 'Identity Win';
       default: return 'Highlighted';
     }
   };
