@@ -18,24 +18,17 @@ interface HighlightedTextProps {
  * - Important phrases: Subtle emphasis
  */
 export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, entities }) => {
-  // Emotion keywords to highlight
-  const emotionWords = [
-    'anxious', 'anxiety', 'worried', 'stress', 'stressed', 'stressful',
-    'happy', 'joyful', 'joy', 'excited', 'excitement',
-    'sad', 'sadness', 'down', 'depressed', 'heavy',
-    'tired', 'exhausted', 'fatigue', 'drained',
-    'calm', 'peaceful', 'serene', 'relaxed',
-    'angry', 'frustrated', 'irritated', 'annoyed',
-    'grateful', 'thankful', 'blessed', 'appreciate',
-    'confident', 'proud', 'accomplished',
-    'overwhelmed', 'burden', 'difficult', 'challenging'
-  ];
+  // Helper function to escape special regex characters
+  const escapeRegex = (str: string): string => {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  };
 
-  // Deadline/urgency keywords
-  const urgencyWords = [
-    'deadline', 'urgent', 'due', 'soon', 'tomorrow', 'today',
-    'pressure', 'rushing', 'hurry', 'quickly', 'asap'
-  ];
+  // Log entities for debugging
+  React.useEffect(() => {
+    if (entities) {
+      console.log('[HighlightedText] Entities received:', entities);
+    }
+  }, [entities]);
 
   // Process text to add highlights
   const processText = (text: string): React.ReactNode[] => {
@@ -45,44 +38,62 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, entit
 
     // Add entity patterns - ALL use emerald theme for consistency
     if (entities) {
+      console.log('[HighlightedText] Processing entities for highlighting');
+      
       // People - subtle emerald highlight
       entities.people.forEach(person => {
-        patterns.push({
-          regex: new RegExp(`\\b(${person})\\b`, 'gi'),
-          className: 'font-semibold text-emerald-800 underline decoration-emerald-300 decoration-2 underline-offset-2',
-          type: 'person'
-        });
+        if (person && person.trim()) {
+          patterns.push({
+            regex: new RegExp(`\\b(${escapeRegex(person)})\\b`, 'gi'),
+            className: 'font-semibold text-emerald-800 underline decoration-emerald-300 decoration-2 underline-offset-2',
+            type: 'person'
+          });
+          console.log(`[HighlightedText] Added pattern for person: ${person}`);
+        }
       });
 
       // Places - subtle emerald highlight (slightly lighter)
       entities.places.forEach(place => {
-        patterns.push({
-          regex: new RegExp(`\\b(${place})\\b`, 'gi'),
-          className: 'font-semibold text-emerald-700 underline decoration-emerald-200 decoration-2 underline-offset-2',
-          type: 'place'
-        });
+        if (place && place.trim()) {
+          patterns.push({
+            regex: new RegExp(`\\b(${escapeRegex(place)})\\b`, 'gi'),
+            className: 'font-semibold text-emerald-700 underline decoration-emerald-200 decoration-2 underline-offset-2',
+            type: 'place'
+          });
+          console.log(`[HighlightedText] Added pattern for place: ${place}`);
+        }
       });
 
       // Events - emerald highlight with slightly stronger emphasis
       entities.events.forEach(event => {
-        const className = event.deadline
-          ? 'font-bold text-emerald-900 underline decoration-emerald-400 decoration-2 underline-offset-2'
-          : 'font-semibold text-emerald-800 underline decoration-emerald-300 decoration-2 underline-offset-2';
-        patterns.push({
-          regex: new RegExp(`\\b(${event.name})\\b`, 'gi'),
-          className,
-          type: event.deadline ? 'deadline' : 'event'
-        });
+        if (event.name && event.name.trim()) {
+          const className = event.deadline
+            ? 'font-bold text-emerald-900 underline decoration-emerald-400 decoration-2 underline-offset-2'
+            : 'font-semibold text-emerald-800 underline decoration-emerald-300 decoration-2 underline-offset-2';
+          patterns.push({
+            regex: new RegExp(`\\b(${escapeRegex(event.name)})\\b`, 'gi'),
+            className,
+            type: event.deadline ? 'deadline' : 'event'
+          });
+          console.log(`[HighlightedText] Added pattern for event: ${event.name} (deadline: ${event.deadline})`);
+        }
       });
 
       // Organizations - emerald highlight
       entities.organizations.forEach(org => {
-        patterns.push({
-          regex: new RegExp(`\\b(${org})\\b`, 'gi'),
-          className: 'font-semibold text-emerald-700 underline decoration-emerald-200 decoration-2 underline-offset-2',
-          type: 'organization'
-        });
+        if (org && org.trim()) {
+          patterns.push({
+            regex: new RegExp(`\\b(${escapeRegex(org)})\\b`, 'gi'),
+            className: 'font-semibold text-emerald-700 underline decoration-emerald-200 decoration-2 underline-offset-2',
+            type: 'organization'
+          });
+          console.log(`[HighlightedText] Added pattern for organization: ${org}`);
+        }
       });
+      
+      console.log(`[HighlightedText] Total patterns created: ${patterns.length}`);
+    } else {
+      console.log('[HighlightedText] No entities provided - skipping highlighting');
     }
 
     // Apply highlights
@@ -125,8 +136,11 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, entit
           className: pattern.className,
           text: match[0]
         });
+        console.log(`[HighlightedText] Found match: "${match[0]}" at position ${match.index}`);
       }
     });
+
+    console.log(`[HighlightedText] Total matches found: ${allMatches.length}`);
 
     // Sort by start position
     allMatches.sort((a, b) => a.start - b.start);
@@ -213,6 +227,16 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, entit
       </em>
     ),
   };
+
+  // If no entities or no content, just render plain markdown
+  if (!entities || !content) {
+    console.log('[HighlightedText] No entities or content, rendering plain text');
+    return (
+      <div className="text-stone-800 text-base leading-[1.8]">
+        <ReactMarkdown>{content}</ReactMarkdown>
+      </div>
+    );
+  }
 
   return (
     <div className="text-stone-800 text-base leading-[1.8]">
