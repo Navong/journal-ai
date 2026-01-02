@@ -1,5 +1,20 @@
 'use client';
 
+// Type declaration for Wake Lock API (not yet in TypeScript lib)
+interface WakeLockSentinel extends EventTarget {
+  released: boolean;
+  type: 'screen';
+  release(): Promise<void>;
+  addEventListener(type: 'release', listener: () => void): void;
+  removeEventListener(type: 'release', listener: () => void): void;
+}
+
+interface Navigator {
+  wakeLock?: {
+    request(type: 'screen'): Promise<WakeLockSentinel>;
+  };
+}
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Reflection, AppStatus, ViewMode, HistoryEntry, Mood, ChatMessage, AudioPlaybackState } from '../types';
 import { getJournalReflection, startJournalChat, generateSpeech } from '../services/geminiService';
@@ -173,6 +188,11 @@ const JournalApp: React.FC = () => {
   const currentAutoPlayKey = getAutoPlayKey(userId, isDemoMode);
   const prevUserIdRef = useRef<string | null>(null);
   const prevDemoModeRef = useRef<boolean>(false);
+
+  // Wake Lock and background operation management for iOS/mobile
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const ongoingOperationsRef = useRef<Set<string>>(new Set()); // Track ongoing operations
+  const pendingOperationsRef = useRef<Map<string, () => Promise<void>>>(new Map()); // Operations to resume
 
   // Clear demo cookie when user logs in
   useEffect(() => {
@@ -421,6 +441,133 @@ const JournalApp: React.FC = () => {
     }
   }, [userId, isDemoMode, session, authStatus]); // Re-run when user/demo/session/status changes
 
+  // Wake Lock API and Page Visibility management for iOS/mobile
+  // Prevents operations from stopping when screen turns off
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // Request wake lock when operations are active (including audio playback)
+    const requestWakeLock = async () => {
+      const shouldKeepAwake = status === AppStatus.LOADING || isGeneratingVoice || isAudioSyncing || isPlayingAudio;
+      
+      if ('wakeLock' in navigator && shouldKeepAwake && !wakeLockRef.current) {
+        try {
+          const wakeLock = await (navigator as any).wakeLock.request('screen');
+          wakeLockRef.current = wakeLock;
+          console.log('[JournalApp] Wake lock acquired for background operations');
+        } catch (err) {
+          console.warn('[JournalApp] Wake lock not available:', err);
+        }
+      }
+    };
+
+    // Release wake lock when operations complete
+    const releaseWakeLock = async () => {
+      const shouldKeepAwake = status === AppStatus.LOADING || isGeneratingVoice || isAudioSyncing || isPlayingAudio;
+      
+      if (wakeLockRef.current && !shouldKeepAwake) {
+        try {
+          await wakeLockRef.current.release();
+          wakeLockRef.current = null;
+          console.log('[JournalApp] Wake lock released');
+        } catch (err) {
+          console.warn('[JournalApp] Error releasing wake lock:', err);
+        }
+      }
+    };
+
+    // Request wake lock when operations start (including audio playback)
+    requestWakeLock();
+
+    // Handle wake lock release (e.g., when screen is manually turned off)
+    const handleWakeLockRelease = () => {
+      console.log('[JournalApp] Wake lock released by system');
+      wakeLockRef.current = null;
+      // Re-request if operations are still active
+      const shouldKeepAwake = status === AppStatus.LOADING || isGeneratingVoice || isAudioSyncing || isPlayingAudio;
+      if (shouldKeepAwake) {
+        requestWakeLock();
+      }
+    };
+
+    if (wakeLockRef.current) {
+      wakeLockRef.current.addEventListener('release', handleWakeLockRelease);
+    }
+
+    return () => {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.removeEventListener('release', handleWakeLockRelease);
+        releaseWakeLock();
+      }
+    };
+  }, [status, isGeneratingVoice, isAudioSyncing, isPlayingAudio]);
+
+  // Page Visibility API - Resume operations when app comes back to foreground
+  // Also manages AudioContext state for background audio playback
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[JournalApp] App became visible, checking for pending operations');
+        
+        // Resume AudioContext if audio is playing
+        if (isPlayingAudio && audioContextRef.current && audioContextRef.current.state === 'suspended') {
+          console.log('[JournalApp] Resuming AudioContext for background audio playback');
+          try {
+            await audioContextRef.current.resume();
+            console.log('[JournalApp] AudioContext resumed successfully');
+          } catch (error) {
+            console.error('[JournalApp] Failed to resume AudioContext:', error);
+          }
+        }
+        
+        // Resume any pending operations
+        for (const [operationId, resumeFn] of pendingOperationsRef.current.entries()) {
+          console.log(`[JournalApp] Resuming operation: ${operationId}`);
+          try {
+            await resumeFn();
+            pendingOperationsRef.current.delete(operationId);
+          } catch (error) {
+            console.error(`[JournalApp] Failed to resume operation ${operationId}:`, error);
+          }
+        }
+
+        // Re-request wake lock if operations are active (including audio playback)
+        const shouldKeepAwake = status === AppStatus.LOADING || isGeneratingVoice || isAudioSyncing || isPlayingAudio;
+        if (shouldKeepAwake) {
+          if ('wakeLock' in navigator && !wakeLockRef.current) {
+            try {
+              const wakeLock = await (navigator as any).wakeLock.request('screen');
+              wakeLockRef.current = wakeLock;
+              console.log('[JournalApp] Wake lock re-acquired after visibility change');
+            } catch (err) {
+              console.warn('[JournalApp] Failed to re-acquire wake lock:', err);
+            }
+          }
+        }
+      } else if (document.visibilityState === 'hidden') {
+        console.log('[JournalApp] App became hidden');
+        
+        // Ensure AudioContext stays running for background audio playback
+        if (isPlayingAudio && audioContextRef.current && audioContextRef.current.state === 'suspended') {
+          console.log('[JournalApp] App hidden but audio playing, attempting to resume AudioContext');
+          try {
+            await audioContextRef.current.resume();
+            console.log('[JournalApp] AudioContext resumed for background playback');
+          } catch (error) {
+            console.warn('[JournalApp] Could not resume AudioContext in background:', error);
+          }
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [status, isGeneratingVoice, isAudioSyncing, isPlayingAudio]);
+
   // Refetch history when switching to History view to ensure fresh data
   useEffect(() => {
     // Only refetch if we're switching to History view and component is mounted
@@ -493,13 +640,19 @@ const JournalApp: React.FC = () => {
         setIsAudioSyncing(true);
 
         // Silent background sync - don't show toast to avoid interrupting user
-        const result = await syncAudioToDatabase((progress) => {
-          setAudioSyncProgress(progress);
-          // Log progress but don't show toast (background operation)
+        // Wrap sync with retry logic for iOS background suspension
+        const result = await withRetry(
+          'sync-audio',
+          () => syncAudioToDatabase((progress) => {
+            setAudioSyncProgress(progress);
+            // Log progress but don't show toast (background operation)
             if (progress.isComplete) {
-            console.log(`[JournalApp] Audio sync complete: ${progress.saved} file(s) synced, ${progress.errors} error(s)`);
-          }
-        });
+              console.log(`[JournalApp] Audio sync complete: ${progress.saved} file(s) synced, ${progress.errors} error(s)`);
+            }
+          }),
+          3,
+          3000
+        );
 
         if (result.success && result.saved > 0) {
           console.log(`[JournalApp] ✅ ${result.saved} audio file(s) synced to cloud`);
@@ -621,6 +774,47 @@ const JournalApp: React.FC = () => {
       console.log('Skipping save - not yet hydrated');
     }
   }, [history, autoPlayEnabled, isDemoMode, userId, currentHistoryKey, currentAutoPlayKey]);
+
+  // Monitor AudioContext state and keep it running during audio playback
+  // Critical for iOS background audio playback when screen turns off
+  useEffect(() => {
+    if (!isPlayingAudio || !audioContextRef.current) return;
+
+    const checkAndResumeAudioContext = async () => {
+      if (audioContextRef.current && audioContextRef.current.state === 'suspended' && isPlayingAudio) {
+        console.log('[JournalApp] AudioContext suspended during playback, attempting to resume...');
+        try {
+          await audioContextRef.current.resume();
+          console.log('[JournalApp] AudioContext resumed successfully for background playback');
+        } catch (error) {
+          console.warn('[JournalApp] Failed to resume AudioContext:', error);
+        }
+      }
+    };
+
+    // Check immediately
+    checkAndResumeAudioContext();
+
+    // Set up periodic check (every 2 seconds) to ensure AudioContext stays running
+    const interval = setInterval(checkAndResumeAudioContext, 2000);
+
+    // Also listen for state changes
+    const handleStateChange = () => {
+      if (audioContextRef.current && audioContextRef.current.state === 'suspended' && isPlayingAudio) {
+        console.log('[JournalApp] AudioContext state changed to suspended, resuming...');
+        audioContextRef.current.resume().catch(console.error);
+      }
+    };
+
+    if (audioContextRef.current) {
+      // Note: AudioContext doesn't have a direct statechange event, so we use interval
+      // But we can listen for visibility changes which we already handle
+    }
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [isPlayingAudio]);
 
   // Cleanup AudioContext on unmount
   useEffect(() => {
@@ -961,6 +1155,9 @@ const JournalApp: React.FC = () => {
         setIsPlayingAudio(true);
         setIsPaused(false);
         setActiveAudioId(id);
+        
+        // Note: Wake lock will be automatically requested via useEffect when isPlayingAudio becomes true
+        // This ensures audio continues playing even when screen turns off on iOS
 
         // Double-check context is running before starting (mobile requirement)
         // Use .then() since we're inside a Promise executor (can't use await)
@@ -1325,11 +1522,16 @@ const JournalApp: React.FC = () => {
         }
       }
 
-      // Generate new audio
+      // Generate new audio with retry logic for iOS background suspension
       const needsChunking = text.length > 1500;
-      const audioResult = await generateSpeech(text, {
-        chunked: needsChunking
-      });
+      const audioResult = await withRetry(
+        `generate-tts-${id}`,
+        () => generateSpeech(text, {
+          chunked: needsChunking
+        }),
+        3,
+        2000
+      );
 
       if (audioResult) {
         audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
@@ -1428,11 +1630,16 @@ const JournalApp: React.FC = () => {
           updateHistoryWithChat(updatedMessages);
           playAudio(audioData, id);
         } else {
-          // Generate with chunking for long texts
+          // Generate with chunking for long texts, with retry logic for iOS background suspension
           const needsChunking = text.length > 1500;
-          const audioResult = await generateSpeech(text, {
-            chunked: needsChunking
-          });
+          const audioResult = await withRetry(
+            `generate-tts-chat-${index}`,
+            () => generateSpeech(text, {
+              chunked: needsChunking
+            }),
+            3,
+            2000
+          );
 
           if (audioResult) {
             const audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
@@ -1466,6 +1673,51 @@ const JournalApp: React.FC = () => {
     }
   };
 
+  // Helper function to wrap operations with retry logic for iOS background suspension
+  const withRetry = async <T,>(
+    operationId: string,
+    operation: () => Promise<T>,
+    maxRetries = 3,
+    retryDelay = 1000
+  ): Promise<T> => {
+    ongoingOperationsRef.current.add(operationId);
+    
+    const attemptOperation = async (attempt: number): Promise<T> => {
+      try {
+        const result = await operation();
+        ongoingOperationsRef.current.delete(operationId);
+        return result;
+      } catch (error) {
+        // Check if error is due to background suspension (network error, timeout)
+        const isSuspensionError = error instanceof Error && (
+          error.message.includes('network') ||
+          error.message.includes('timeout') ||
+          error.message.includes('aborted') ||
+          error.message.includes('Failed to fetch')
+        );
+
+        if (isSuspensionError && attempt < maxRetries) {
+          console.log(`[JournalApp] Operation ${operationId} suspended, retrying (attempt ${attempt + 1}/${maxRetries})...`);
+          
+          // Store operation for resume if app goes to background
+          pendingOperationsRef.current.set(operationId, async () => {
+            return attemptOperation(attempt + 1);
+          });
+
+          // Wait before retry
+          await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
+          return attemptOperation(attempt + 1);
+        }
+        
+        ongoingOperationsRef.current.delete(operationId);
+        pendingOperationsRef.current.delete(operationId);
+        throw error;
+      }
+    };
+
+    return attemptOperation(1);
+  };
+
   const handleEntryChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setEntry(e.target.value);
   };
@@ -1487,7 +1739,13 @@ const JournalApp: React.FC = () => {
         setContextRevalidated(false);
       }
 
-      const { reflection: content, summary, topic, mood: detectedMood, entities, highlights } = await getJournalReflection(entry, selectedMood, history);
+      // Wrap with retry logic for iOS background suspension
+      const { reflection: content, summary, topic, mood: detectedMood, entities, highlights } = await withRetry(
+        'get-reflection',
+        () => getJournalReflection(entry, selectedMood, history),
+        3,
+        2000
+      );
       console.log(`[JournalApp] Received reflection with topic: "${topic}", mood: "${detectedMood}", entities:`, entities, 'highlights:', highlights);
       const newReflection = {
         content,
@@ -1559,11 +1817,16 @@ const JournalApp: React.FC = () => {
                 h.id === newId ? { ...h, audioBase64: cached } : h
               ));
             } else {
-              // Generate new audio
+              // Generate new audio with retry logic for iOS background suspension
               const needsChunking = content.length > 1500;
-              const generated = await generateSpeech(content, {
-                chunked: needsChunking
-              });
+              const generated = await withRetry(
+                'generate-tts-main',
+                () => generateSpeech(content, {
+                  chunked: needsChunking
+                }),
+                3,
+                2000
+              );
 
               if (!generated) {
                 showToast('Could not generate audio automatically.', 'error');
