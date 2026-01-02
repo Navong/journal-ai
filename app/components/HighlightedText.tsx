@@ -23,69 +23,90 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, entit
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   };
 
-  // Important words to highlight - all in ONE color (emerald)
-  const importantWords = [
-    // Strong emotions
-    'anxious', 'anxiety', 'worried', 'stress', 'stressed', 'stressful',
-    'happy', 'joyful', 'joy', 'excited', 'excitement',
-    'sad', 'sadness', 'depressed', 'depression',
-    'tired', 'exhausted', 'fatigue', 'drained',
-    'calm', 'peaceful', 'serene', 'relaxed',
-    'angry', 'frustrated', 'irritated',
-    'grateful', 'thankful', 'blessed',
-    'proud', 'accomplished', 'confident',
-    'overwhelmed', 'burden', 'difficult', 'challenging',
+  // Important phrases to highlight (multi-word patterns)
+  const phrasePatterns = [
+    // Emotion phrases (feeling + emotion)
+    'feeling anxious', 'feeling stressed', 'feeling overwhelmed', 'feeling tired',
+    'feeling happy', 'feeling calm', 'feeling grateful', 'feeling proud',
+    'feeling worried', 'feeling frustrated', 'feeling excited',
     
-    // Important actions/verbs
-    'realize', 'realized', 'understand', 'understood',
-    'notice', 'noticed', 'recognize', 'recognized',
-    'feel', 'feeling', 'felt',
-    'struggle', 'struggling', 'struggled',
-    'achieve', 'achieved', 'accomplish', 'accomplished',
+    // Insight phrases (understanding/realization)
+    'starting to realize', 'beginning to understand', 'starting to notice',
+    'I realize', 'I understand', 'I notice', 'I recognize',
+    'it sounds like', 'it seems like', 'it appears',
     
-    // Time/urgency
-    'deadline', 'urgent', 'important', 'priority',
-    'today', 'tomorrow', 'soon', 'now'
+    // Progress phrases
+    'making progress', 'moving forward', 'taking steps',
+    'working through', 'working on', 'dealing with',
+    
+    // Support phrases
+    'reaching out', 'asking for help', 'seeking support',
+    'taking care', 'being kind', 'showing compassion',
+    
+    // Challenge phrases
+    'struggling with', 'dealing with', 'working through',
+    'facing challenges', 'going through',
+    
+    // Time phrases
+    'upcoming deadline', 'project deadline', 'important deadline',
+    'next week', 'this week', 'coming up',
+    
+    // Relationship phrases
+    'talking with', 'meeting with', 'spending time with',
+    'conversation with', 'discussed with'
   ];
 
-  // Process text to add highlights - BOLD ONLY (super clean)
+  // Process text to add highlights - BOLD PHRASES (not individual words)
   const processText = (text: string): React.ReactNode[] => {
-    const patterns: Array<{ regex: RegExp; className: string; type: string }> = [];
+    const patterns: Array<{ regex: RegExp; className: string; type: string; priority: number }> = [];
 
     // Simple bold highlight - no colors, no backgrounds
     const highlightClass = 'font-bold';
 
-    // Add entity patterns if available
+    // Priority 1: Multi-word phrases (highest priority - matched first)
+    phrasePatterns.forEach(phrase => {
+      patterns.push({
+        regex: new RegExp(`\\b(${escapeRegex(phrase)})\\b`, 'gi'),
+        className: highlightClass,
+        type: 'phrase',
+        priority: 1
+      });
+    });
+
+    // Priority 2: Entity names (matched after phrases)
     if (entities) {
-      // People
+      // People (might be full names like "Sarah Johnson")
       entities.people.forEach(person => {
         if (person && person.trim()) {
           patterns.push({
             regex: new RegExp(`\\b(${escapeRegex(person)})\\b`, 'gi'),
             className: highlightClass,
-            type: 'person'
+            type: 'person',
+            priority: 2
           });
         }
       });
 
-      // Places
+      // Places (might be multi-word like "Central Park")
       entities.places.forEach(place => {
         if (place && place.trim()) {
           patterns.push({
             regex: new RegExp(`\\b(${escapeRegex(place)})\\b`, 'gi'),
             className: highlightClass,
-            type: 'place'
+            type: 'place',
+            priority: 2
           });
         }
       });
 
-      // Events
+      // Events (likely multi-word like "team meeting")
       entities.events.forEach(event => {
         if (event.name && event.name.trim()) {
           patterns.push({
             regex: new RegExp(`\\b(${escapeRegex(event.name)})\\b`, 'gi'),
             className: highlightClass,
-            type: 'event'
+            type: 'event',
+            priority: 2
           });
         }
       });
@@ -96,28 +117,23 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, entit
           patterns.push({
             regex: new RegExp(`\\b(${escapeRegex(org)})\\b`, 'gi'),
             className: highlightClass,
-            type: 'organization'
+            type: 'organization',
+            priority: 2
           });
         }
       });
     }
-
-    // Add important word patterns
-    importantWords.forEach(word => {
-      patterns.push({
-        regex: new RegExp(`\\b(${word})\\b`, 'gi'),
-        className: highlightClass,
-        type: 'important'
-      });
-    });
 
     // Apply highlights
     if (patterns.length === 0) {
       return [text];
     }
 
+    // Sort patterns by priority (phrases first, then entities)
+    patterns.sort((a, b) => a.priority - b.priority);
+
     // Find all matches
-    const allMatches: Array<{ start: number; end: number; className: string; text: string }> = [];
+    const allMatches: Array<{ start: number; end: number; className: string; text: string; priority: number }> = [];
 
     patterns.forEach(pattern => {
       const regex = new RegExp(pattern.regex);
@@ -127,7 +143,8 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, entit
           start: match.index,
           end: match.index + match[0].length,
           className: pattern.className,
-          text: match[0]
+          text: match[0],
+          priority: pattern.priority
         });
       }
     });
@@ -136,18 +153,31 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, entit
       return [text];
     }
 
-    // Sort by start position
-    allMatches.sort((a, b) => a.start - b.start);
+    // Sort by priority first (lower = higher priority), then by length (longer = higher priority), then position
+    allMatches.sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      const lengthDiff = (b.end - b.start) - (a.end - a.start);
+      if (lengthDiff !== 0) return lengthDiff;
+      return a.start - b.start;
+    });
 
-    // Remove overlapping matches (keep first occurrence)
+    // Remove overlapping matches (keep longer/higher priority matches)
     const filteredMatches: typeof allMatches = [];
-    let lastEnd = -1;
     allMatches.forEach(match => {
-      if (match.start >= lastEnd) {
+      // Check if this match overlaps with any already-selected match
+      const hasOverlap = filteredMatches.some(existing => 
+        (match.start >= existing.start && match.start < existing.end) ||
+        (match.end > existing.start && match.end <= existing.end) ||
+        (match.start <= existing.start && match.end >= existing.end)
+      );
+      
+      if (!hasOverlap) {
         filteredMatches.push(match);
-        lastEnd = match.end;
       }
     });
+
+    // Re-sort by position for rendering
+    filteredMatches.sort((a, b) => a.start - b.start);
 
     // Build result
     const result: React.ReactNode[] = [];
