@@ -1,23 +1,47 @@
 
 import { GoogleGenAI, Chat, Modality, Type } from "@google/genai";
-import { HistoryEntry, ChatMessage, Mood } from "../types";
+import { HistoryEntry, ChatMessage, Mood, ExtractedEntities } from "../types";
 import logger from "../utils/logger";
+import { extractEntities } from "../utils/entityExtraction";
+import { buildEntityContext, formatEntityContextForPrompt } from "./entityTrackingService";
 
 const log = logger.module('GeminiService');
 
 const SYSTEM_INSTRUCTION = `
-You are "Serenity," a compassionate journaling companion. Your expertise lies in empathetic reflection and pattern recognition across a user's mental wellness journey.
+You are "Serenity," a compassionate journaling companion with exceptional attention to detail. Your expertise lies in empathetic reflection, pattern recognition, and detail-oriented personal assistance across a user's mental wellness journey.
 
 ROLE & OBJECTIVES:
 1. PRIMARY FOCUS: Reflect on the user's current journal entry with deep empathy and validation.
-2. LONG-TERM MEMORY: You have access to a context window of the user's past entries. Use this history to identify recurring themes, progress, or shifts in mood over time.
-3. PATTERN RECOGNITION: If the user mentions a struggle they've faced before, gently acknowledge their persistence or any new ways they are handling it.
-4. NON-CLINICAL: Stay supportive and non-diagnostic. Use warm, human-centric language.
-5. CHAT MODE: When the user asks follow-up questions, continue to be their companion. 
+2. LONG-TERM MEMORY: You have access to a context window of the user's past entries, including:
+   - Emotional patterns and mood shifts
+   - Recurring themes and topics
+   - **Specific people, places, and events mentioned**
+   - **Important deadlines and upcoming events**
+3. DETAIL AWARENESS: Pay close attention to specific entities (names, places, events) and acknowledge them when relevant. Be a great personal assistant, not just emotional support.
+4. PATTERN RECOGNITION: Notice when people/places/events recur across entries and acknowledge progress or changes.
+5. NON-CLINICAL: Stay supportive and non-diagnostic. Use warm, human-centric language.
+6. CHAT MODE: When the user asks follow-up questions, continue to be their companion with detail awareness.
+
+**⚠️ CONTEXT CHECKLIST (Check before every response):**
+☐ Did the user mention a specific person's name in the last 3 entries?
+   → If yes, acknowledge that person by name and reference past mentions if relevant
+☐ Did the user mention a specific place in the last 3 entries?
+   → If yes, acknowledge the place and any context around it
+☐ Did the user mention an upcoming event or deadline in the last 3 entries?
+   → If yes, acknowledge it and show empathy about it (if appropriate)
+☐ Are there recurring people/places across multiple entries?
+   → If yes, notice patterns in how they feel about these recurring entities
+
+**RESPONSE GUIDELINES:**
+- Use specific names when the user mentions them (e.g., "It sounds like your conversation with Sarah..." not "your conversation with that person...")
+- Reference specific places when relevant (e.g., "You've mentioned the office several times..." not "your workplace...")
+- Acknowledge upcoming events/deadlines with empathy (e.g., "With the presentation on Friday approaching...")
+- Connect the dots between entries when entities recur (e.g., "Last week you mentioned feeling anxious about meeting with John, and now...")
+- Show you remember details from past entries to build continuity
 
 OUTPUT FORMAT:
 You must provide your response in JSON format with two fields:
-- "reflection": Your deep, empathetic response (Markdown allowed).
+- "reflection": Your deep, empathetic response with specific entity acknowledgment (Markdown allowed).
 - "summary": A very brief, one-sentence summary of the user's core theme or emotion in this entry.
 `;
 
@@ -596,14 +620,30 @@ export const getJournalReflection = async (
   entry: string,
   mood: string,
   history: HistoryEntry[]
-): Promise<{ reflection: string; summary: string; topic?: string; mood?: Mood }> => {
+): Promise<{ reflection: string; summary: string; topic?: string; mood?: Mood; entities?: ExtractedEntities }> => {
   const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured. Please set NEXT_PUBLIC_GEMINI_API_KEY in your .env.local file');
   }
   const ai = new GoogleGenAI({ apiKey });
 
-  // Always auto-detect mood (ignore user-selected mood, use AI detection)
+  // Step 1: Extract entities from current entry (parallel with mood/topic detection)
+  let currentEntities: ExtractedEntities | undefined;
+  try {
+    log.debug('Extracting entities from current entry');
+    currentEntities = await extractEntities(entry);
+    log.info('Entities extracted', { 
+      people: currentEntities.people.length,
+      places: currentEntities.places.length,
+      events: currentEntities.events.length,
+      organizations: currentEntities.organizations.length
+    });
+  } catch (error) {
+    log.error('Entity extraction failed', {}, error as Error);
+    // Continue without entities - don't break the flow
+  }
+
+  // Step 2: Always auto-detect mood (ignore user-selected mood, use AI detection)
   let finalMood: Mood = 'none';
   try {
     log.debug('Auto-detecting mood for entry', { entryLength: entry.length });
@@ -621,7 +661,7 @@ export const getJournalReflection = async (
     finalMood = 'none';
   }
 
-  // Detect topic FIRST so we can use it for better context selection
+  // Step 3: Detect topic FIRST so we can use it for better context selection
   let detectedTopic: string | undefined;
   try {
     log.debug('Detecting topic for entry');
@@ -636,7 +676,11 @@ export const getJournalReflection = async (
     // Continue without topic if detection fails
   }
 
-  // Use improved context selection with topic (now async with embeddings)
+  // Step 4: Build entity context from history (last 3 entries)
+  const entityContext = buildEntityContext(history, 3);
+  const entityContextPrompt = formatEntityContextForPrompt(entityContext);
+
+  // Step 5: Use improved context selection with topic (now async with embeddings)
   // Use detected mood for better context selection
   const historyContext = await selectRelevantContext(
     entry,
@@ -654,6 +698,9 @@ export const getJournalReflection = async (
     : MAX_CONTEXT_TOKENS_REFLECTION;
 
   const prompt = `
+### ENTITY CONTEXT (SPECIFIC DETAILS FROM RECENT ENTRIES)
+${entityContextPrompt}
+
 ### USER CONTEXT (RELEVANT PAST ENTRIES)
 The following entries from the user's journal history have been selected because they are relevant to the current entry based on topic similarity, mood patterns, content similarity, or recency. Each entry is labeled with why it's relevant.
 
@@ -662,12 +709,20 @@ ${historyContext}
 ### CURRENT ENTRY
 Content: "${entry}"
 
+**⚠️ BEFORE RESPONDING - COMPLETE THE CONTEXT CHECKLIST:**
+1. Check if any specific people were mentioned in recent entries → Acknowledge by name
+2. Check if any specific places were mentioned → Reference them specifically  
+3. Check if any events/deadlines are upcoming → Acknowledge with empathy
+4. Check if any entities recur across entries → Notice patterns
+
 **IMPORTANT:** 
 - Focus primarily on the CURRENT ENTRY above
+- Use entity context to add specific, detail-oriented observations
+- Reference people, places, events BY NAME when relevant
+- Show you remember details from past entries to build continuity
 - Use the context entries to recognize patterns, acknowledge progress, or note recurring themes
 - Only reference past entries when they add meaningful value to your reflection
-- Do not let irrelevant past context distract from the user's current thoughts
-- If past entries seem unrelated to the current entry, focus entirely on the current entry
+- Be a great personal assistant who remembers details, not just emotional support
 
 Please provide your reflection and a concise summary.
 **Also identify:**
@@ -686,7 +741,10 @@ Please provide your reflection and a concise summary.
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            reflection: { type: Type.STRING, description: "The AI's deep empathetic response." },
+            reflection: { 
+              type: Type.STRING, 
+              description: "The AI's deep empathetic response with specific entity acknowledgment. Use names, places, and events BY NAME when relevant."
+            },
             summary: { type: Type.STRING, description: "A one-sentence summary of the entry's core theme." },
             topic: {
               type: Type.STRING,
@@ -786,7 +844,8 @@ Please provide your reflection and a concise summary.
       reflection: reflectionContent,
       summary: summaryContent,
       topic: finalTopic,
-      mood: finalMood
+      mood: finalMood,
+      entities: currentEntities // Return extracted entities to be saved with the entry
     };
   } catch (error) {
     log.error('Gemini API error during reflection generation', {}, error as Error);
@@ -807,6 +866,10 @@ export const startJournalChat = async (
   }
   const ai = new GoogleGenAI({ apiKey });
 
+  // Build entity context for chat (last 3 entries)
+  const entityContext = buildEntityContext(history, 3);
+  const entityContextPrompt = formatEntityContextForPrompt(entityContext);
+
   // Use improved context selection for chat (more focused, less tokens)
   // Use topic from the current reflection for better context (now async with embeddings)
   const historyContext = await selectRelevantContext(
@@ -824,15 +887,27 @@ export const startJournalChat = async (
       systemInstruction: `${SYSTEM_INSTRUCTION}
 
 CONTEXT FOR THIS CONVERSATION:
-Journal Entry: ${entry}
-Mood: ${mood}
-Your Initial Reflection: ${initialReflection}
 
-Relevant Past Context (labeled with relevance reasons):
+**Entity Context (Specific Details):**
+${entityContextPrompt}
+
+**Journal Entry:** ${entry}
+**Mood:** ${mood}
+**Your Initial Reflection:** ${initialReflection}
+
+**Relevant Past Context (labeled with relevance reasons):**
 ${historyContext}
+
+**⚠️ REMEMBER THE CONTEXT CHECKLIST:**
+- Reference people by name when relevant
+- Acknowledge specific places mentioned
+- Be aware of upcoming events/deadlines
+- Notice recurring patterns in entities
+- Show you remember details to build continuity
 
 **IMPORTANT:** 
 - Focus on the current conversation context above
+- Use entity context to be detail-oriented and helpful
 - Use past entries only when they directly relate to what the user is asking
 - Do not reference irrelevant past context - focus on answering the current question
 - Each past entry is labeled with why it's relevant - ignore entries that don't match the current discussion`,
