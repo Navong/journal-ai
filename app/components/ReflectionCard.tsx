@@ -2,13 +2,12 @@
 
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Reflection, ExtractedEntities } from '../types';
+import { Reflection } from '../types';
 import { HighlightedText } from './HighlightedText';
 
 interface ReflectionCardProps {
   reflection: Reflection | null;
   isLoading: boolean;
-  entities?: ExtractedEntities; // Add entities prop for highlighting
   onPlay?: () => void;
   onPause?: () => void;
   onStop?: () => void;
@@ -22,7 +21,6 @@ interface ReflectionCardProps {
 export const ReflectionCard: React.FC<ReflectionCardProps> = ({
   reflection,
   isLoading,
-  entities,
   onPlay,
   onPause,
   onStop,
@@ -59,7 +57,7 @@ export const ReflectionCard: React.FC<ReflectionCardProps> = ({
             <div className="text-stone-800 font-serif text-base sm:text-lg leading-relaxed" style={{ fontFamily: 'var(--font-lora), serif' }}>
               <HighlightedText 
                 content={reflection?.content || ''} 
-                entities={entities}
+                highlights={reflection?.highlights}
               />
             </div>
           )}

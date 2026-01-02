@@ -1396,13 +1396,14 @@ const JournalApp: React.FC = () => {
         setContextRevalidated(false);
       }
 
-      const { reflection: content, summary, topic, mood: detectedMood, entities } = await getJournalReflection(entry, selectedMood, history);
-      console.log(`[JournalApp] Received reflection with topic: "${topic}", mood: "${detectedMood}", entities:`, entities);
+      const { reflection: content, summary, topic, mood: detectedMood, entities, highlights } = await getJournalReflection(entry, selectedMood, history);
+      console.log(`[JournalApp] Received reflection with topic: "${topic}", mood: "${detectedMood}", entities:`, entities, 'highlights:', highlights);
       const newReflection = {
         content,
         summary,
         timestamp: new Date(),
-        topic
+        topic,
+        highlights // Include highlights in reflection state
       };
 
       const newId = crypto.randomUUID();
@@ -1419,9 +1420,10 @@ const JournalApp: React.FC = () => {
         topic: topic,
         timestamp: new Date().toISOString(),
         chatHistory: [],
-        entities: entities // Save extracted entities
+        entities: entities, // Save extracted entities
+        highlights: highlights // Save AI-detected highlights
       };
-      console.log(`[JournalApp] Created history entry with topic: "${topic}", entities:`, entities);
+      console.log(`[JournalApp] Created history entry with topic: "${topic}", entities:`, entities, 'highlights:', highlights);
 
       setHistory(prev => [newHistoryEntry, ...prev]);
 
@@ -2067,7 +2069,6 @@ const JournalApp: React.FC = () => {
             <ReflectionCard
               reflection={reflection}
               isLoading={status === AppStatus.LOADING}
-              entities={currentHistoryId ? history.find(h => h.id === currentHistoryId)?.entities : undefined}
               onPlay={handleTogglePlayback}
               onPause={pauseCurrentAudio}
               onStop={stopCurrentAudio}

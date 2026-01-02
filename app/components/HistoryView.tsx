@@ -231,7 +231,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 <div className="bg-[#F2F6F3] p-4 md:p-6 rounded-xl md:rounded-2xl border border-emerald-100/50 text-stone-800 font-serif text-sm md:text-base leading-relaxed mb-3 md:mb-4 shadow-sm">
                   <HighlightedText 
                     content={item.reflection} 
-                    entities={item.entities}
+                    highlights={item.highlights}
                   />
                   {/* Audio Playback Buttons */}
                   {(onPlayAudio || onPauseAudio || onStopAudio) && (
