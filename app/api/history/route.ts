@@ -41,6 +41,8 @@ export async function GET(request: NextRequest) {
         summary: true,
         topic: true,
         mood: true,
+        entities: true, // Include entities (people, places, events)
+        highlights: true, // Include AI-detected highlights
         audioData: includeAudio, // Only fetch audio if explicitly requested
         createdAt: true,
         updatedAt: true,
@@ -141,6 +143,8 @@ export async function POST(request: NextRequest) {
             summary: entryData.summary || null,
             topic: entryData.topic || null,
             mood: entryData.mood ?? null, // Save auto-detected mood (anxious, calm, etc.) or null if 'none'
+            entities: entryData.entities || null, // Save extracted entities (people, places, events)
+            highlights: entryData.highlights || null, // Save AI-detected highlights for UI
             audioData: entryData.audio_data || null,
             createdAt: entryData.created_at ? new Date(entryData.created_at) : new Date(),
           },
@@ -150,6 +154,8 @@ export async function POST(request: NextRequest) {
             summary: entryData.summary || null,
             topic: entryData.topic || null,
             mood: entryData.mood ?? null, // Save auto-detected mood (anxious, calm, etc.) or null if 'none'
+            entities: entryData.entities || null, // Update extracted entities
+            highlights: entryData.highlights || null, // Update AI-detected highlights
             // Only update audioData if it's explicitly provided in the request
             // If audio_data field is missing/undefined, don't update audio field (preserves existing audio)
             // This prevents overwriting audio when syncing from device without audio in memory

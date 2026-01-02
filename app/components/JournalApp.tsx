@@ -1795,6 +1795,14 @@ const JournalApp: React.FC = () => {
       // Authenticated: clear from Supabase
       try {
         await historyService.deleteAllEntries();
+        
+        // IMPORTANT: Also clear localStorage to prevent migration logic from re-importing old data
+        // The migration logic (lines 331-338) checks if DB is empty and localStorage has data,
+        // and automatically migrates localStorage → DB. This would undo the clear!
+        localStorage.removeItem(LEGACY_HISTORY_KEY); // Clear legacy key
+        localStorage.removeItem(`serenity_journal_history_${userId}`); // Clear user-specific key
+        localStorage.removeItem(currentHistoryKey); // Clear current key (should be same as above)
+        console.log('[JournalApp] Cleared database and localStorage to prevent migration re-import');
       } catch (error) {
         console.error('Failed to clear history from Supabase:', error);
         showToast('Failed to clear history', 'error');
