@@ -23,62 +23,61 @@ Improved the visual presentation of AI-generated reflections with intelligent hi
 
 ## Highlighting System
 
-### **Color-Coded Highlights:**
+### **Clean, Minimal Design:**
 
-#### 🔵 **People** (Blue Highlight)
-- Names mentioned in your entries
-- Example: **Sarah**, **Mom**, **Dr. Smith**
-- Style: Blue background, bold, underline
+Uses **emerald green** theme throughout for consistency and elegance.
 
-#### 🟢 **Places** (Green Highlight)
-- Locations, venues, buildings
-- Example: **office**, **gym**, **Central Park**
-- Style: Green background, bold, underline
+#### **Important Words** (Emerald Underline)
+- **People**: Names mentioned → Emerald underline, semibold
+  - Example: <u>**Sarah**</u>, <u>**Mom**</u>, <u>**Dr. Smith**</u>
+  
+- **Places**: Locations → Emerald underline, semibold
+  - Example: <u>**office**</u>, <u>**gym**</u>, <u>**Central Park**</u>
+  
+- **Events**: Meetings, appointments → Emerald underline, semibold
+  - Example: <u>**presentation**</u>, <u>**interview**</u>
+  
+- **Deadlines**: Urgent events → Darker emerald underline, bold
+  - Example: <u>**project deadline**</u>, <u>**due Friday**</u>
+  
+- **Organizations**: Companies, teams → Emerald underline, semibold
+  - Example: <u>**Apple**</u>, <u>**Harvard**</u>
 
-#### 🟣 **Events** (Purple Highlight)
-- Meetings, appointments, activities
-- Example: **presentation**, **interview**, **dinner**
-- Style: Purple background, bold, underline
-
-#### 🔴 **Deadlines** (Red Highlight - Most Important!)
-- Urgent events with due dates
-- Example: **deadline**, **project due**
-- Style: Red background, extra bold, underline
-
-#### 🟡 **Organizations** (Amber Highlight)
-- Companies, schools, teams
-- Example: **Apple**, **Harvard**, **Lakers**
-- Style: Amber background, bold, underline
-
-#### 🟠 **Emotions** (Soft Amber Highlight)
-- Emotion words detected in text
-- Examples: *anxious*, *happy*, *stressed*, *calm*, *tired*
-- Style: Soft amber background, medium weight
-
-#### 🟥 **Urgency** (Soft Red Highlight)
-- Time-sensitive keywords
-- Examples: *urgent*, *asap*, *today*, *deadline*
-- Style: Soft red background, medium weight
+**Design Philosophy:**
+- ✅ One color family (emerald) - matches app theme
+- ✅ No background colors - clean and readable
+- ✅ Subtle underlines - not distracting
+- ✅ Font weight for emphasis - bold for deadlines, semibold for others
+- ✅ Minimal and elegant
 
 ---
 
 ## Examples
 
-### **Example 1: Entity Recognition**
+### **Example 1: Clean Entity Recognition**
 
 **Input:**
 > "I had coffee with Sarah at the office. She's stressed about the presentation on Friday."
 
 **Output with Highlighting:**
-> "I had coffee with <mark style="background: lightblue; font-weight: bold;">**Sarah**</mark> at the <mark style="background: lightgreen; font-weight: bold;">**office**</mark>. She's <mark style="background: #fff4e6;">*stressed*</mark> about the <mark style="background: #ffe4e6; font-weight: bold;">**presentation**</mark> on Friday."
+> "I had coffee with <u style="text-decoration-color: #10b981; text-decoration-thickness: 2px;"><b>Sarah</b></u> at the <u style="text-decoration-color: #10b981; text-decoration-thickness: 2px;"><b>office</b></u>. She's stressed about the <u style="text-decoration-color: #047857; text-decoration-thickness: 2px;"><b>presentation</b></u> on Friday."
 
-### **Example 2: Emotion Highlighting**
+**Visual:**
+- Sarah → emerald underline (person)
+- office → emerald underline (place)  
+- presentation → darker emerald underline (event)
+- No background colors - clean and minimal!
+
+### **Example 2: Deadline Emphasis**
 
 **Input:**
-> "Feeling anxious about the deadline. Need to stay calm and focused."
+> "The project deadline is next Monday. Need to finish this soon."
 
 **Output with Highlighting:**
-> "Feeling <mark style="background: #fff4e6;">*anxious*</mark> about the <mark style="background: #ffe4e6;">*deadline*</mark>. Need to stay <mark style="background: #fff4e6;">*calm*</mark> and focused."
+> "The <u style="text-decoration-color: #065f46; text-decoration-thickness: 2px;"><b>project deadline</b></u> is next Monday. Need to finish this soon."
+
+**Visual:**
+- project deadline → dark emerald underline + bold (urgent)
 
 ---
 
@@ -236,22 +235,21 @@ Potential user preferences (not implemented yet):
 ```
 I hear that you had coffee with Sarah at the office. 
 It sounds like she's feeling stressed about the presentation deadline. 
-It's thoughtful that you're supporting her during this anxious time.
+It's thoughtful that you're supporting her during this time.
 ```
 
-### **With Highlighting (After):**
+### **With Highlighting (After - Clean & Minimal):**
 ```
-I hear that you had coffee with [Sarah]🔵 at the [office]🟢. 
-It sounds like she's feeling [stressed]🟠 about the [presentation]🔴 [deadline]🟥. 
-It's thoughtful that you're supporting her during this [anxious]🟠 time.
+I hear that you had coffee with Sarah̲ at the office̲. 
+It sounds like she's feeling stressed about the presentation deadline̲. 
+It's thoughtful that you're supporting her during this time.
 ```
 
 **Legend:**
-- 🔵 = Blue (People)
-- 🟢 = Green (Places)
-- 🔴 = Red (Deadlines/Events)
-- 🟥 = Soft Red (Urgency words)
-- 🟠 = Amber (Emotions)
+- Underlined words = Important entities (people, places, events)
+- Bold underline = Deadlines (most important)
+- All in emerald green theme - clean and consistent!
+- No messy background colors
 
 ---
 

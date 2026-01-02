@@ -40,33 +40,34 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, entit
   // Process text to add highlights
   const processText = (text: string): React.ReactNode[] => {
     // Build regex patterns for highlighting
+    // Using ONLY emerald/green tones to match app theme - clean and minimal
     const patterns: Array<{ regex: RegExp; className: string; type: string }> = [];
 
-    // Add entity patterns
+    // Add entity patterns - ALL use emerald theme for consistency
     if (entities) {
-      // People - blue highlight
+      // People - subtle emerald highlight
       entities.people.forEach(person => {
         patterns.push({
           regex: new RegExp(`\\b(${person})\\b`, 'gi'),
-          className: 'bg-blue-50 text-blue-900 px-1 rounded font-semibold border-b-2 border-blue-200',
+          className: 'font-semibold text-emerald-800 underline decoration-emerald-300 decoration-2 underline-offset-2',
           type: 'person'
         });
       });
 
-      // Places - green highlight
+      // Places - subtle emerald highlight (slightly lighter)
       entities.places.forEach(place => {
         patterns.push({
           regex: new RegExp(`\\b(${place})\\b`, 'gi'),
-          className: 'bg-green-50 text-green-900 px-1 rounded font-semibold border-b-2 border-green-200',
+          className: 'font-semibold text-emerald-700 underline decoration-emerald-200 decoration-2 underline-offset-2',
           type: 'place'
         });
       });
 
-      // Events - purple/red highlight
+      // Events - emerald highlight with slightly stronger emphasis
       entities.events.forEach(event => {
         const className = event.deadline
-          ? 'bg-red-50 text-red-900 px-1 rounded font-bold border-b-2 border-red-300'
-          : 'bg-purple-50 text-purple-900 px-1 rounded font-semibold border-b-2 border-purple-200';
+          ? 'font-bold text-emerald-900 underline decoration-emerald-400 decoration-2 underline-offset-2'
+          : 'font-semibold text-emerald-800 underline decoration-emerald-300 decoration-2 underline-offset-2';
         patterns.push({
           regex: new RegExp(`\\b(${event.name})\\b`, 'gi'),
           className,
@@ -74,33 +75,15 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, entit
         });
       });
 
-      // Organizations - amber highlight
+      // Organizations - emerald highlight
       entities.organizations.forEach(org => {
         patterns.push({
           regex: new RegExp(`\\b(${org})\\b`, 'gi'),
-          className: 'bg-amber-50 text-amber-900 px-1 rounded font-semibold border-b-2 border-amber-200',
+          className: 'font-semibold text-emerald-700 underline decoration-emerald-200 decoration-2 underline-offset-2',
           type: 'organization'
         });
       });
     }
-
-    // Emotion words - soft amber highlight
-    emotionWords.forEach(word => {
-      patterns.push({
-        regex: new RegExp(`\\b(${word}(?:ed|ing|s)?)\\b`, 'gi'),
-        className: 'bg-amber-50/50 text-amber-900 px-0.5 rounded font-medium',
-        type: 'emotion'
-      });
-    });
-
-    // Urgency words - soft red highlight
-    urgencyWords.forEach(word => {
-      patterns.push({
-        regex: new RegExp(`\\b(${word}(?:s)?)\\b`, 'gi'),
-        className: 'bg-red-50/50 text-red-800 px-0.5 rounded font-medium',
-        type: 'urgency'
-      });
-    });
 
     // Apply highlights
     let processedText = text;
