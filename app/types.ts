@@ -15,7 +15,7 @@ export interface ExtractedEntities {
   organizations: string[]; // Companies, schools, groups
 }
 
-export type HighlightType = 'somatic_marker' | 'identity_anchor' | 'external_stressor' | 'emotional_shift';
+export type HighlightType = 'somatic_stressor' | 'identity_win';
 
 export interface Highlight {
   text: string;           // The exact phrase to highlight
