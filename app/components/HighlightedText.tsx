@@ -48,12 +48,12 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, entit
     'today', 'tomorrow', 'soon', 'now'
   ];
 
-  // Process text to add highlights - ONE COLOR ONLY (emerald)
+  // Process text to add highlights - BOLD ONLY (super clean)
   const processText = (text: string): React.ReactNode[] => {
     const patterns: Array<{ regex: RegExp; className: string; type: string }> = [];
 
-    // Single highlight style - emerald background with darker text
-    const highlightClass = 'bg-emerald-50 text-emerald-900 px-1 py-0.5 rounded font-medium';
+    // Simple bold highlight - no colors, no backgrounds
+    const highlightClass = 'font-bold';
 
     // Add entity patterns if available
     if (entities) {
@@ -163,14 +163,14 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, entit
         );
       }
 
-      // Add highlighted match
+      // Add highlighted match (bold only, no mark element)
       result.push(
-        <mark
-          key={`mark-${idx}`}
-          className={`${match.className} transition-all`}
+        <strong
+          key={`bold-${idx}`}
+          className={match.className}
         >
           {match.text}
-        </mark>
+        </strong>
       );
 
       lastIndex = match.end;

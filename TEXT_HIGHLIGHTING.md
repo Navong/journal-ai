@@ -23,61 +23,69 @@ Improved the visual presentation of AI-generated reflections with intelligent hi
 
 ## Highlighting System
 
-### **Clean, Minimal Design:**
+### **Ultra-Clean, Minimal Design:**
 
-Uses **emerald green** theme throughout for consistency and elegance.
+Uses **bold text only** - the simplest and cleanest approach.
 
-#### **Important Words** (Emerald Underline)
-- **People**: Names mentioned → Emerald underline, semibold
-  - Example: <u>**Sarah**</u>, <u>**Mom**</u>, <u>**Dr. Smith**</u>
+#### **Important Words Get Bold**
+- **People**: Names mentioned → **Bold**
+  - Example: **Sarah**, **Mom**, **Dr. Smith**
   
-- **Places**: Locations → Emerald underline, semibold
-  - Example: <u>**office**</u>, <u>**gym**</u>, <u>**Central Park**</u>
+- **Places**: Locations → **Bold**
+  - Example: **office**, **gym**, **Central Park**
   
-- **Events**: Meetings, appointments → Emerald underline, semibold
-  - Example: <u>**presentation**</u>, <u>**interview**</u>
+- **Events**: Meetings, appointments → **Bold**
+  - Example: **presentation**, **interview**, **meeting**
   
-- **Deadlines**: Urgent events → Darker emerald underline, bold
-  - Example: <u>**project deadline**</u>, <u>**due Friday**</u>
+- **Deadlines**: Urgent events → **Bold**
+  - Example: **deadline**, **due Friday**
   
-- **Organizations**: Companies, teams → Emerald underline, semibold
-  - Example: <u>**Apple**</u>, <u>**Harvard**</u>
+- **Organizations**: Companies, teams → **Bold**
+  - Example: **Apple**, **Harvard**
+
+- **Emotion Words**: Feelings → **Bold**
+  - Example: **anxious**, **happy**, **stressed**, **calm**
+
+- **Action/Insight Words**: Key verbs → **Bold**
+  - Example: **realize**, **understand**, **notice**, **feel**
 
 **Design Philosophy:**
-- ✅ One color family (emerald) - matches app theme
-- ✅ No background colors - clean and readable
-- ✅ Subtle underlines - not distracting
-- ✅ Font weight for emphasis - bold for deadlines, semibold for others
-- ✅ Minimal and elegant
+- ✅ No colors at all - maximum simplicity
+- ✅ No backgrounds - pure and clean
+- ✅ No underlines - not distracting
+- ✅ Just bold text - instantly recognizable
+- ✅ Minimal and elegant - focuses attention without overwhelming
 
 ---
 
 ## Examples
 
-### **Example 1: Clean Entity Recognition**
+### **Example 1: Simple Bold Highlighting**
 
 **Input:**
 > "I had coffee with Sarah at the office. She's stressed about the presentation on Friday."
 
 **Output with Highlighting:**
-> "I had coffee with <u style="text-decoration-color: #10b981; text-decoration-thickness: 2px;"><b>Sarah</b></u> at the <u style="text-decoration-color: #10b981; text-decoration-thickness: 2px;"><b>office</b></u>. She's stressed about the <u style="text-decoration-color: #047857; text-decoration-thickness: 2px;"><b>presentation</b></u> on Friday."
+> "I had coffee with **Sarah** at the **office**. She's **feeling** **stressed** about the **presentation** on Friday."
 
 **Visual:**
-- Sarah → emerald underline (person)
-- office → emerald underline (place)  
-- presentation → darker emerald underline (event)
-- No background colors - clean and minimal!
+- Important words are simply **bold**
+- No colors, no backgrounds
+- Clean and readable!
 
-### **Example 2: Deadline Emphasis**
+### **Example 2: Emotion & Action Emphasis**
 
 **Input:**
-> "The project deadline is next Monday. Need to finish this soon."
+> "I realize I need to stay calm about the deadline. Feeling grateful for the support."
 
 **Output with Highlighting:**
-> "The <u style="text-decoration-color: #065f46; text-decoration-thickness: 2px;"><b>project deadline</b></u> is next Monday. Need to finish this soon."
+> "I **realize** I need to stay **calm** about the **deadline**. **Feeling** **grateful** for the support."
 
 **Visual:**
-- project deadline → dark emerald underline + bold (urgent)
+- Key insight words: **realize**
+- Emotions: **calm**, **grateful**
+- Urgency: **deadline**
+- All just bold - super simple!
 
 ---
 
@@ -238,18 +246,18 @@ It sounds like she's feeling stressed about the presentation deadline.
 It's thoughtful that you're supporting her during this time.
 ```
 
-### **With Highlighting (After - Clean & Minimal):**
+### **With Bold Highlighting (After - Ultra Clean!):**
 ```
-I hear that you had coffee with Sarah̲ at the office̲. 
-It sounds like she's feeling stressed about the presentation deadline̲. 
+I hear that you had coffee with **Sarah** at the **office**. 
+It sounds like she's **feeling** **stressed** about the **presentation** **deadline**. 
 It's thoughtful that you're supporting her during this time.
 ```
 
-**Legend:**
-- Underlined words = Important entities (people, places, events)
-- Bold underline = Deadlines (most important)
-- All in emerald green theme - clean and consistent!
-- No messy background colors
+**Design:**
+- Important words = **Bold**
+- That's it! No colors, no backgrounds, no underlines
+- Cleanest possible approach
+- Natural reading flow with emphasis where it matters
 
 ---
 
