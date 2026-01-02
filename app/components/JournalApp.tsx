@@ -862,8 +862,12 @@ const JournalApp: React.FC = () => {
           // The onended event often fires early (especially with compressed audio from DB)
           // Wait for the full expected duration plus a small safety buffer
           const waitTime = Math.max(0, remainingTime) + 150; // Add 150ms safety buffer
+          
+          // Cap at a reasonable maximum to handle edge cases where onended fires VERY early
+          // Use 15 seconds as maximum wait (increased from 2.5s to fix early stop bug)
+          const cappedWaitTime = Math.min(waitTime, 15000);
 
-          console.log(`[playAudioChunk] onended fired after ${timeElapsed.toFixed(0)}ms, expected ${timingInfo.expectedDurationMs.toFixed(0)}ms, waiting ${waitTime.toFixed(0)}ms more`);
+          console.log(`[playAudioChunk] onended fired after ${timeElapsed.toFixed(0)}ms, expected ${timingInfo.expectedDurationMs.toFixed(0)}ms, waiting ${cappedWaitTime.toFixed(0)}ms more (${waitTime > 15000 ? 'capped from ' + waitTime.toFixed(0) + 'ms' : 'uncapped'})`);
 
           setTimeout(() => {
             // Only call onComplete if playback should continue
@@ -873,7 +877,7 @@ const JournalApp: React.FC = () => {
               }
             }
             resolve();
-          }, Math.min(waitTime, 2500)); // Cap at 2.5 seconds max delay
+          }, cappedWaitTime);
         };
 
         source.addEventListener('error', (event: Event) => {
