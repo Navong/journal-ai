@@ -1,3 +1,4 @@
+'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -11,16 +12,18 @@ interface ChatInterfaceProps {
   onTogglePlayback?: (text: string, index: number) => void;
   activeAudioId?: string | number | null;
   generatingAudioId?: string | number | null;
+  contextRevalidated?: boolean;
 }
 
-export const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
-  messages, 
-  onSendMessage, 
+export const ChatInterface: React.FC<ChatInterfaceProps> = ({
+  messages,
+  onSendMessage,
   isSending,
   onClose,
   onTogglePlayback,
   activeAudioId,
-  generatingAudioId
+  generatingAudioId,
+  contextRevalidated = false
 }) => {
   const [inputText, setInputText] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -52,13 +55,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 md:p-6 animate-in fade-in duration-300">
       {/* Backdrop */}
-      <div 
-        className="absolute inset-0 bg-stone-900/40 backdrop-blur-sm cursor-pointer" 
+      <div
+        className="absolute inset-0 bg-stone-900/40 backdrop-blur-sm cursor-pointer"
         onClick={onClose}
       />
-      
+
       {/* Modal Container */}
-      <div 
+      <div
         ref={containerRef}
         className="relative w-full max-w-2xl bg-[#FDFCF8] h-[95vh] sm:h-[85vh] flex flex-col rounded-t-[2rem] sm:rounded-[2.5rem] shadow-2xl border border-stone-100 overflow-hidden animate-in slide-in-from-bottom-10 duration-500"
       >
@@ -70,13 +73,23 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
             </div>
-            <div>
+            <div className="flex-1">
               <h3 className="text-[10px] md:text-xs font-bold text-stone-400 uppercase tracking-widest">Conversation</h3>
+              <div className="flex items-center gap-2 mt-0.5">
               <p className="text-[9px] md:text-[10px] text-emerald-600 font-medium tracking-wide uppercase">Refining Insights</p>
+                {contextRevalidated && (
+                  <span className="flex items-center gap-1 text-[8px] md:text-[9px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full uppercase tracking-widest font-bold border border-emerald-100 animate-pulse">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Context Updated
+                  </span>
+                )}
+              </div>
             </div>
           </div>
-          
-          <button 
+
+          <button
             onClick={onClose}
             className="w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center text-stone-300 hover:text-stone-600 hover:bg-stone-100 transition-all active:scale-90"
           >
@@ -96,70 +109,69 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 </svg>
               </div>
               <p className="text-stone-400 italic font-serif text-base md:text-lg leading-relaxed">
-                "Every conversation is a bridge to clarity."<br/>
+                "Every conversation is a bridge to clarity."<br />
                 <span className="text-[10px] font-sans not-italic uppercase tracking-widest mt-4 inline-block opacity-60">Ask anything about your thoughts.</span>
               </p>
             </div>
           )}
-          
+
           {messages.map((msg, i) => {
             const id = `chat-${i}`;
             const isPlaying = activeAudioId === id;
             const isGenerating = generatingAudioId === id;
             const isModel = msg.role === 'model';
-            
+
             return (
-              <div 
-                key={i} 
+              <div
+                key={i}
                 className={`flex flex-col ${isModel ? 'items-start' : 'items-end'} animate-in fade-in duration-500`}
               >
                 <div className={`flex max-w-[95%] md:max-w-[85%] group ${isModel ? 'flex-row' : 'flex-row-reverse'} items-end gap-2 md:gap-3`}>
                   {isModel && (
                     <div className="flex-shrink-0 flex flex-col items-center gap-2 mb-2">
-                       <button
-                          onClick={() => onTogglePlayback?.(msg.text, i)}
-                          disabled={isGenerating}
-                          className={`w-8 h-8 md:w-9 md:h-9 rounded-full flex items-center justify-center transition-all duration-300 active:scale-90 ${
-                            isGenerating 
-                              ? 'bg-stone-50 text-stone-300 cursor-wait' 
-                              : isPlaying 
-                                ? 'bg-emerald-100 text-emerald-700 shadow-inner' 
-                                : 'bg-stone-50 text-stone-300 hover:text-emerald-600 hover:bg-emerald-50'
+                      <button
+                        onClick={() => onTogglePlayback?.(msg.text, i)}
+                        disabled={isGenerating}
+                        className={`w-8 h-8 md:w-9 md:h-9 rounded-full flex items-center justify-center transition-all duration-300 active:scale-90 ${isGenerating
+                          ? 'bg-stone-50 text-stone-300 cursor-wait'
+                          : isPlaying
+                            ? 'bg-emerald-100 text-emerald-700 shadow-inner'
+                            : 'bg-stone-50 text-stone-300 hover:text-emerald-600 hover:bg-emerald-50'
                           }`}
-                        >
-                          {isGenerating ? (
-                            <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                          ) : isPlaying ? (
-                            <span className="flex gap-0.5">
-                              <span className="w-0.5 h-2 bg-emerald-600 animate-[bounce_0.6s_infinite]"></span>
-                              <span className="w-0.5 h-3 bg-emerald-600 animate-[bounce_0.8s_infinite]"></span>
-                            </span>
-                          ) : (
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 md:h-4 md:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                            </svg>
-                          )}
-                        </button>
+                      >
+                        {isGenerating ? (
+                          <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                        ) : isPlaying ? (
+                          <span className="flex gap-0.5">
+                            <span className="w-0.5 h-2 bg-emerald-600 animate-[bounce_0.6s_infinite]"></span>
+                            <span className="w-0.5 h-3 bg-emerald-600 animate-[bounce_0.8s_infinite]"></span>
+                          </span>
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 md:h-4 md:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                          </svg>
+                        )}
+                      </button>
                     </div>
                   )}
-                  
+
                   <div className={`
                     relative px-4 md:px-6 py-3 md:py-4 rounded-2xl md:rounded-3xl text-sm md:text-base leading-relaxed transition-all
-                    ${!isModel 
-                      ? 'bg-stone-100 text-stone-700 rounded-br-none border border-stone-200/50' 
+                    ${!isModel
+                      ? 'bg-stone-100 text-stone-700 rounded-br-none border border-stone-200/50'
                       : 'bg-[#F2F6F3] text-stone-800 border border-emerald-100/50 rounded-bl-none shadow-sm'}
                   `}>
                     {isModel ? (
-                      <div className="prose prose-stone prose-sm font-serif italic text-stone-800 leading-relaxed">
+                      <div className="prose prose-stone prose-sm font-serif italic text-stone-800 leading-relaxed" style={{ fontFamily: 'var(--font-lora), serif' }}>
                         <ReactMarkdown>{msg.text}</ReactMarkdown>
                       </div>
                     ) : (
                       <div className="whitespace-pre-wrap">{msg.text}</div>
                     )}
-                    
+
                     {isPlaying && isModel && (
                       <div className="absolute -bottom-4 md:-bottom-5 left-0 flex items-center gap-1.5 opacity-60">
                         <span className="flex gap-0.5">
@@ -174,7 +186,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
               </div>
             );
           })}
-          
+
           {isSending && (
             <div className="flex justify-start animate-pulse">
               <div className="bg-[#F2F6F3] px-5 py-3 rounded-2xl md:rounded-3xl rounded-bl-none border border-emerald-100 flex items-center gap-2 md:gap-3 ml-10 md:ml-12 shadow-sm">
@@ -208,8 +220,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
               disabled={!inputText.trim() || isSending}
               className={`
                 absolute right-2 md:right-3 top-1/2 -translate-y-1/2 w-9 h-9 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-all duration-300 active:scale-90
-                ${!inputText.trim() || isSending 
-                  ? 'text-stone-200 bg-transparent' 
+                ${!inputText.trim() || isSending
+                  ? 'text-stone-200 bg-transparent'
                   : 'text-white bg-emerald-700 hover:bg-emerald-800 shadow-md'}
               `}
             >
