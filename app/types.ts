@@ -1,6 +1,20 @@
 
 export type Mood = 'calm' | 'joyful' | 'anxious' | 'tired' | 'reflective' | 'heavy' | 'none';
 
+export interface Event {
+  name: string;
+  date?: string;           // ISO date string if mentioned
+  deadline?: boolean;      // Is this a deadline/urgent event?
+  description?: string;    // Brief context
+}
+
+export interface ExtractedEntities {
+  people: string[];        // Names of people mentioned
+  places: string[];        // Locations, cities, venues
+  events: Event[];         // Events with optional dates/deadlines
+  organizations: string[]; // Companies, schools, groups
+}
+
 export interface Reflection {
   content: string;
   summary: string;
@@ -32,6 +46,7 @@ export interface HistoryEntry {
   timestamp: string;
   chatHistory?: ChatMessage[];
   audioBase64?: string | string[]; // Store audio for history entries
+  entities?: ExtractedEntities; // Extracted entities (people, places, events, organizations)
 }
 
 export enum AppStatus {

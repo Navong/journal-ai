@@ -1378,8 +1378,8 @@ const JournalApp: React.FC = () => {
         setContextRevalidated(false);
       }
 
-      const { reflection: content, summary, topic } = await getJournalReflection(entry, selectedMood, history);
-      console.log(`[JournalApp] Received reflection with topic: "${topic}"`);
+      const { reflection: content, summary, topic, mood: detectedMood, entities } = await getJournalReflection(entry, selectedMood, history);
+      console.log(`[JournalApp] Received reflection with topic: "${topic}", mood: "${detectedMood}", entities:`, entities);
       const newReflection = {
         content,
         summary,
@@ -1397,12 +1397,13 @@ const JournalApp: React.FC = () => {
         text: entry,
         summary: summary,
         reflection: content,
-        mood: selectedMood,
+        mood: detectedMood || selectedMood, // Use AI-detected mood, fallback to selected
         topic: topic,
         timestamp: new Date().toISOString(),
-        chatHistory: []
+        chatHistory: [],
+        entities: entities // Save extracted entities
       };
-      console.log(`[JournalApp] Created history entry with topic: "${topic}"`);
+      console.log(`[JournalApp] Created history entry with topic: "${topic}", entities:`, entities);
 
       setHistory(prev => [newHistoryEntry, ...prev]);
 
@@ -1578,7 +1579,7 @@ const JournalApp: React.FC = () => {
     if (!chatSessionRef.current) {
       if (!reflection) return;
       // Always use the latest history state to ensure deleted entries are excluded
-      chatSessionRef.current = startJournalChat(entry, reflection.content, selectedMood, history, reflection.topic);
+      chatSessionRef.current = await startJournalChat(entry, reflection.content, selectedMood, history, reflection.topic);
       // Clear context revalidation indicator when session is recreated
       if (contextRevalidated) {
         setContextRevalidated(false);
@@ -1593,7 +1594,7 @@ const JournalApp: React.FC = () => {
     setIsSendingChat(true);
 
     try {
-      const response = await chatSessionRef.current.sendMessage({ message: text });
+      const response = await chatSessionRef.current!.sendMessage({ message: text });
       const modelText = response.text || "I'm here listening, but I couldn't find the right words just now.";
       const newModelMsg: ChatMessage = { role: 'model', text: modelText };
 
