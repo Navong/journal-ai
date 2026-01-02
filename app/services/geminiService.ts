@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Chat, Modality, Type } from "@google/genai";
-import { HistoryEntry, ChatMessage, Mood, ExtractedEntities } from "../types";
+import { HistoryEntry, ChatMessage, Mood, ExtractedEntities, Highlight } from "../types";
 import logger from "../utils/logger";
 import { extractEntities } from "../utils/entityExtraction";
 import { buildEntityContext, formatEntityContextForPrompt } from "./entityTrackingService";
@@ -620,7 +620,7 @@ export const getJournalReflection = async (
   entry: string,
   mood: string,
   history: HistoryEntry[]
-): Promise<{ reflection: string; summary: string; topic?: string; mood?: Mood; entities?: ExtractedEntities }> => {
+): Promise<{ reflection: string; summary: string; topic?: string; mood?: Mood; entities?: ExtractedEntities; highlights?: Highlight[] }> => {
   const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured. Please set NEXT_PUBLIC_GEMINI_API_KEY in your .env.local file');
@@ -728,6 +728,17 @@ Please provide your reflection and a concise summary.
 **Also identify:**
 1. **The main topic** (1-3 words) - what is the primary subject matter being discussed?
 2. **The emotional mood** - one of: calm, joyful, anxious, tired, reflective, heavy, or none
+3. **Key phrases to highlight** in your reflection text - identify phrases (2-5 words each) that fall into these 4 categories:
+   
+   **a) Somatic Markers** - Physical sensations mentioned (e.g., "jaw is locking up", "knees are throbbing", "feeling shaky", "chest is tight")
+   
+   **b) Identity Anchors** - Personal strengths, achievements, or resilience shown (e.g., "pushed through 18 miles", "found your voice", "stayed committed", "showing courage")
+   
+   **c) External Stressors** - Specific people, events, or situations causing stress (e.g., "Sarah's quick sync", "Miller follow-up", "team meeting", "project deadline")
+   
+   **d) Emotional Shifts** - Changes in emotional state or complex emotions (e.g., "cozy melancholy", "incredible relief", "feeling lighter", "sense of peace")
+
+**Important:** Only highlight phrases that appear in YOUR reflection text, not the user's entry. Extract exact phrases (2-5 words) from your own response.
 `;
 
   try {
@@ -745,7 +756,10 @@ Please provide your reflection and a concise summary.
               type: Type.STRING, 
               description: "The AI's deep empathetic response with specific entity acknowledgment. Use names, places, and events BY NAME when relevant."
             },
-            summary: { type: Type.STRING, description: "A one-sentence summary of the entry's core theme." },
+            summary: { 
+              type: Type.STRING, 
+              description: "A one-sentence summary of the entry's core theme." 
+            },
             topic: {
               type: Type.STRING,
               description: "The main topic or theme (1-3 words) - what is the primary subject matter being discussed? Examples: work stress, family conflict, health anxiety, creative projects, relationship struggles, career planning, etc. Focus on WHAT they're writing about, not emotional state."
@@ -753,9 +767,27 @@ Please provide your reflection and a concise summary.
             mood: {
               type: Type.STRING,
               description: "The emotional mood or state: calm (peaceful, relaxed, serene), joyful (happy, excited, positive, grateful), anxious (worried, nervous, stressed, overwhelmed), tired (exhausted, drained, fatigued), reflective (thoughtful, contemplative, introspective), heavy (sad, burdened, melancholic, down), or none (neutral, unclear, or mixed emotions). Return ONE mood that best represents the overall emotional tone."
+            },
+            highlights: {
+              type: Type.ARRAY,
+              description: "Key phrases from YOUR reflection text to highlight for visual emphasis. Extract exact phrases (2-5 words) that appear in your response.",
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  text: {
+                    type: Type.STRING,
+                    description: "The exact phrase to highlight (must appear in your reflection text)"
+                  },
+                  type: {
+                    type: Type.STRING,
+                    description: "Category: somatic_marker (physical sensations), identity_anchor (strengths/achievements), external_stressor (people/events causing stress), or emotional_shift (emotion changes)"
+                  }
+                },
+                required: ["text", "type"]
+              }
             }
           },
-          required: ["reflection", "summary", "topic", "mood"]
+          required: ["reflection", "summary", "topic", "mood", "highlights"]
         }
       },
     });
@@ -763,6 +795,9 @@ Please provide your reflection and a concise summary.
     const data = JSON.parse(response.text || "{}");
     const reflectionContent = data.reflection || "I'm processing your thoughts. Thank you for sharing.";
     const summaryContent = data.summary || "A moment of reflection.";
+    const highlights: Highlight[] = Array.isArray(data.highlights) ? data.highlights : [];
+    
+    log.info('AI returned highlights', { count: highlights.length, highlights });
 
     // Mood from reflection response (most accurate - AI understands full context)
     let reflectionMood: Mood | undefined;
@@ -845,7 +880,8 @@ Please provide your reflection and a concise summary.
       summary: summaryContent,
       topic: finalTopic,
       mood: finalMood,
-      entities: currentEntities // Return extracted entities to be saved with the entry
+      entities: currentEntities, // Return extracted entities to be saved with the entry
+      highlights: highlights // Return AI-detected highlights for UI emphasis
     };
   } catch (error) {
     log.error('Gemini API error during reflection generation', {}, error as Error);

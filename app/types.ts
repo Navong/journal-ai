@@ -15,11 +15,19 @@ export interface ExtractedEntities {
   organizations: string[]; // Companies, schools, groups
 }
 
+export type HighlightType = 'somatic_marker' | 'identity_anchor' | 'external_stressor' | 'emotional_shift';
+
+export interface Highlight {
+  text: string;           // The exact phrase to highlight
+  type: HighlightType;    // Category of highlight
+}
+
 export interface Reflection {
   content: string;
   summary: string;
   timestamp: Date;
-  topic?: string; // Detected topic of the journal entry
+  topic?: string;         // Detected topic of the journal entry
+  highlights?: Highlight[]; // AI-detected phrases to highlight
 }
 
 export interface ChatMessage {
@@ -47,6 +55,7 @@ export interface HistoryEntry {
   chatHistory?: ChatMessage[];
   audioBase64?: string | string[]; // Store audio for history entries
   entities?: ExtractedEntities; // Extracted entities (people, places, events, organizations)
+  highlights?: Highlight[]; // AI-detected phrases to highlight in reflection text
 }
 
 export enum AppStatus {

@@ -2,184 +2,112 @@
 
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
-import { ExtractedEntities } from '../types';
+import { Highlight, HighlightType } from '../types';
 
 interface HighlightedTextProps {
   content: string;
-  entities?: ExtractedEntities;
+  highlights?: Highlight[]; // AI-provided highlights
 }
 
 /**
- * Highlights important words and phrases in reflection text
- * - People names: Blue highlight
- * - Places: Green highlight  
- * - Events/Deadlines: Purple/Red highlight
- * - Emotions: Amber highlight
- * - Important phrases: Subtle emphasis
+ * Highlights phrases in reflection text based on AI-detected categories
+ * Uses 4 categories for sophisticated visual narrative:
+ * 1. Somatic Markers - Physical sensations (red glow)
+ * 2. Identity Anchors - Strengths/achievements (gold/yellow)
+ * 3. External Stressors - People/events causing stress (grey/purple)
+ * 4. Emotional Shifts - Emotion changes (blue/italic)
  */
-export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, entities }) => {
-  // Helper function to escape special regex characters
+export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highlights }) => {
+  // If no highlights provided, render plain text
+  if (!highlights || highlights.length === 0) {
+    return (
+      <div className="text-stone-800 text-base leading-[1.8]">
+        <ReactMarkdown>{content}</ReactMarkdown>
+      </div>
+    );
+  }
+
+  // Get style class for each highlight type
+  const getStyleForType = (type: HighlightType): string => {
+    switch (type) {
+      case 'somatic_marker':
+        // Physical sensations - subtle red underline
+        return 'underline decoration-red-400 decoration-2 underline-offset-2 font-semibold text-stone-900';
+      
+      case 'identity_anchor':
+        // Strengths/achievements - bold with subtle gold background
+        return 'font-bold bg-amber-50 text-amber-900 px-1 py-0.5 rounded';
+      
+      case 'external_stressor':
+        // External stressors - subtle purple/grey box
+        return 'bg-stone-100 text-stone-800 px-1 py-0.5 rounded border border-stone-200 font-medium';
+      
+      case 'emotional_shift':
+        // Emotional shifts - italic with subtle blue tint
+        return 'italic text-blue-900 font-medium';
+      
+      default:
+        return 'font-semibold';
+    }
+  };
+
+  // Helper to escape special regex characters
   const escapeRegex = (str: string): string => {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   };
 
-  // Important phrases to highlight (multi-word patterns)
-  const phrasePatterns = [
-    // Emotion phrases (feeling + emotion)
-    'feeling anxious', 'feeling stressed', 'feeling overwhelmed', 'feeling tired',
-    'feeling happy', 'feeling calm', 'feeling grateful', 'feeling proud',
-    'feeling worried', 'feeling frustrated', 'feeling excited',
+  // Build list of all matches in the text
+  const allMatches: Array<{ 
+    start: number; 
+    end: number; 
+    text: string; 
+    className: string; 
+    type: HighlightType 
+  }> = [];
+
+  highlights.forEach(highlight => {
+    if (!highlight.text || !highlight.text.trim()) return;
+
+    // Find all occurrences of this phrase in the content
+    const regex = new RegExp(`\\b(${escapeRegex(highlight.text.trim())})\\b`, 'gi');
+    let match;
     
-    // Insight phrases (understanding/realization)
-    'starting to realize', 'beginning to understand', 'starting to notice',
-    'I realize', 'I understand', 'I notice', 'I recognize',
-    'it sounds like', 'it seems like', 'it appears',
-    
-    // Progress phrases
-    'making progress', 'moving forward', 'taking steps',
-    'working through', 'working on', 'dealing with',
-    
-    // Support phrases
-    'reaching out', 'asking for help', 'seeking support',
-    'taking care', 'being kind', 'showing compassion',
-    
-    // Challenge phrases
-    'struggling with', 'dealing with', 'working through',
-    'facing challenges', 'going through',
-    
-    // Time phrases
-    'upcoming deadline', 'project deadline', 'important deadline',
-    'next week', 'this week', 'coming up',
-    
-    // Relationship phrases
-    'talking with', 'meeting with', 'spending time with',
-    'conversation with', 'discussed with'
-  ];
-
-  // Process text to add highlights - BOLD PHRASES (not individual words)
-  const processText = (text: string): React.ReactNode[] => {
-    const patterns: Array<{ regex: RegExp; className: string; type: string; priority: number }> = [];
-
-    // Simple bold highlight - no colors, no backgrounds
-    const highlightClass = 'font-bold';
-
-    // Priority 1: Multi-word phrases (highest priority - matched first)
-    phrasePatterns.forEach(phrase => {
-      patterns.push({
-        regex: new RegExp(`\\b(${escapeRegex(phrase)})\\b`, 'gi'),
-        className: highlightClass,
-        type: 'phrase',
-        priority: 1
-      });
-    });
-
-    // Priority 2: Entity names (matched after phrases)
-    if (entities) {
-      // People (might be full names like "Sarah Johnson")
-      entities.people.forEach(person => {
-        if (person && person.trim()) {
-          patterns.push({
-            regex: new RegExp(`\\b(${escapeRegex(person)})\\b`, 'gi'),
-            className: highlightClass,
-            type: 'person',
-            priority: 2
-          });
-        }
-      });
-
-      // Places (might be multi-word like "Central Park")
-      entities.places.forEach(place => {
-        if (place && place.trim()) {
-          patterns.push({
-            regex: new RegExp(`\\b(${escapeRegex(place)})\\b`, 'gi'),
-            className: highlightClass,
-            type: 'place',
-            priority: 2
-          });
-        }
-      });
-
-      // Events (likely multi-word like "team meeting")
-      entities.events.forEach(event => {
-        if (event.name && event.name.trim()) {
-          patterns.push({
-            regex: new RegExp(`\\b(${escapeRegex(event.name)})\\b`, 'gi'),
-            className: highlightClass,
-            type: 'event',
-            priority: 2
-          });
-        }
-      });
-
-      // Organizations
-      entities.organizations.forEach(org => {
-        if (org && org.trim()) {
-          patterns.push({
-            regex: new RegExp(`\\b(${escapeRegex(org)})\\b`, 'gi'),
-            className: highlightClass,
-            type: 'organization',
-            priority: 2
-          });
-        }
+    while ((match = regex.exec(content)) !== null) {
+      allMatches.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        text: match[0],
+        className: getStyleForType(highlight.type),
+        type: highlight.type
       });
     }
+  });
 
-    // Apply highlights
-    if (patterns.length === 0) {
-      return [text];
+  // If no matches found, render plain text
+  if (allMatches.length === 0) {
+    return (
+      <div className="text-stone-800 text-base leading-[1.8]">
+        <ReactMarkdown>{content}</ReactMarkdown>
+      </div>
+    );
+  }
+
+  // Sort by start position
+  allMatches.sort((a, b) => a.start - b.start);
+
+  // Remove overlapping matches (keep first occurrence)
+  const filteredMatches: typeof allMatches = [];
+  let lastEnd = -1;
+  
+  allMatches.forEach(match => {
+    if (match.start >= lastEnd) {
+      filteredMatches.push(match);
+      lastEnd = match.end;
     }
+  });
 
-    // Sort patterns by priority (phrases first, then entities)
-    patterns.sort((a, b) => a.priority - b.priority);
-
-    // Find all matches
-    const allMatches: Array<{ start: number; end: number; className: string; text: string; priority: number }> = [];
-
-    patterns.forEach(pattern => {
-      const regex = new RegExp(pattern.regex);
-      let match;
-      while ((match = regex.exec(text)) !== null) {
-        allMatches.push({
-          start: match.index,
-          end: match.index + match[0].length,
-          className: pattern.className,
-          text: match[0],
-          priority: pattern.priority
-        });
-      }
-    });
-
-    if (allMatches.length === 0) {
-      return [text];
-    }
-
-    // Sort by priority first (lower = higher priority), then by length (longer = higher priority), then position
-    allMatches.sort((a, b) => {
-      if (a.priority !== b.priority) return a.priority - b.priority;
-      const lengthDiff = (b.end - b.start) - (a.end - a.start);
-      if (lengthDiff !== 0) return lengthDiff;
-      return a.start - b.start;
-    });
-
-    // Remove overlapping matches (keep longer/higher priority matches)
-    const filteredMatches: typeof allMatches = [];
-    allMatches.forEach(match => {
-      // Check if this match overlaps with any already-selected match
-      const hasOverlap = filteredMatches.some(existing => 
-        (match.start >= existing.start && match.start < existing.end) ||
-        (match.end > existing.start && match.end <= existing.end) ||
-        (match.start <= existing.start && match.end >= existing.end)
-      );
-      
-      if (!hasOverlap) {
-        filteredMatches.push(match);
-      }
-    });
-
-    // Re-sort by position for rendering
-    filteredMatches.sort((a, b) => a.start - b.start);
-
-    // Build result
+  // Build highlighted text
+  const buildHighlightedText = (): React.ReactNode[] => {
     const result: React.ReactNode[] = [];
     let lastIndex = 0;
 
@@ -188,29 +116,30 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, entit
       if (match.start > lastIndex) {
         result.push(
           <span key={`text-${idx}`}>
-            {text.substring(lastIndex, match.start)}
+            {content.substring(lastIndex, match.start)}
           </span>
         );
       }
 
-      // Add highlighted match (bold only, no mark element)
+      // Add highlighted phrase
       result.push(
-        <strong
-          key={`bold-${idx}`}
+        <span
+          key={`highlight-${idx}`}
           className={match.className}
+          title={formatTypeLabel(match.type)}
         >
           {match.text}
-        </strong>
+        </span>
       );
 
       lastIndex = match.end;
     });
 
     // Add remaining text
-    if (lastIndex < text.length) {
+    if (lastIndex < content.length) {
       result.push(
         <span key="text-final">
-          {text.substring(lastIndex)}
+          {content.substring(lastIndex)}
         </span>
       );
     }
@@ -218,45 +147,20 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, entit
     return result;
   };
 
-  // Custom renderer for ReactMarkdown
-  const renderers = {
-    p: ({ children, ...props }: any) => {
-      // Process text nodes for highlighting
-      const processNode = (node: any): any => {
-        if (typeof node === 'string') {
-          return processText(node);
-        }
-        if (React.isValidElement(node)) {
-          return node;
-        }
-        return node;
-      };
-
-      const processedChildren = React.Children.map(children, processNode);
-
-      return (
-        <p {...props} className="mb-4 last:mb-0 leading-relaxed">
-          {processedChildren}
-        </p>
-      );
-    },
-    strong: ({ children, ...props }: any) => (
-      <strong {...props} className="font-bold text-stone-900">
-        {children}
-      </strong>
-    ),
-    em: ({ children, ...props }: any) => (
-      <em {...props} className="italic text-stone-700">
-        {children}
-      </em>
-    ),
+  // Format type label for tooltip
+  const formatTypeLabel = (type: HighlightType): string => {
+    switch (type) {
+      case 'somatic_marker': return 'Physical sensation';
+      case 'identity_anchor': return 'Personal strength';
+      case 'external_stressor': return 'External stressor';
+      case 'emotional_shift': return 'Emotional shift';
+      default: return 'Highlighted';
+    }
   };
 
   return (
     <div className="text-stone-800 text-base leading-[1.8]">
-      <ReactMarkdown components={renderers}>
-        {content}
-      </ReactMarkdown>
+      {buildHighlightedText()}
     </div>
   );
 };
