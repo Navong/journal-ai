@@ -165,7 +165,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                       : 'bg-[#F2F6F3] text-stone-800 border border-emerald-100/50 rounded-bl-none shadow-sm'}
                   `}>
                     {isModel ? (
-                      <div className="prose prose-stone prose-sm font-serif italic text-stone-800 leading-relaxed" style={{ fontFamily: 'var(--font-lora), serif' }}>
+                      <div className="prose prose-stone prose-sm font-serif text-stone-800 leading-relaxed" style={{ fontFamily: 'var(--font-lora), serif' }}>
                         <ReactMarkdown>{msg.text}</ReactMarkdown>
                       </div>
                     ) : (

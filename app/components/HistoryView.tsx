@@ -5,6 +5,7 @@ import { HistoryEntry } from '../types';
 import ReactMarkdown from 'react-markdown';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { EntityTags } from './EntityTags';
+import { HighlightedText } from './HighlightedText';
 
 interface HistoryViewProps {
   history: HistoryEntry[];
@@ -227,8 +228,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 </div>
 
                 {/* Reflection Card */}
-                <div className="bg-[#F2F6F3] p-4 md:p-6 rounded-xl md:rounded-2xl border border-emerald-100/50 text-stone-800 italic font-serif text-sm md:text-base leading-relaxed mb-3 md:mb-4 shadow-sm">
-                  <ReactMarkdown>{item.reflection}</ReactMarkdown>
+                <div className="bg-[#F2F6F3] p-4 md:p-6 rounded-xl md:rounded-2xl border border-emerald-100/50 text-stone-800 font-serif text-sm md:text-base leading-relaxed mb-3 md:mb-4 shadow-sm">
+                  <HighlightedText 
+                    content={item.reflection} 
+                    highlights={item.highlights}
+                  />
                   {/* Audio Playback Buttons */}
                   {(onPlayAudio || onPauseAudio || onStopAudio) && (
                     <div className="mt-3 md:mt-4 flex justify-end gap-2">
