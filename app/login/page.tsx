@@ -8,6 +8,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const isDevelopment = process.env.NODE_ENV === 'development';
 
   const handleTryDemo = () => {
     // Set demo mode cookie (expires in 24 hours)
@@ -25,6 +26,28 @@ export default function LoginPage() {
       await signIn('google', { callbackUrl: '/' });
     } catch (err) {
       setError('An error occurred. Please try again.');
+      setIsLoading(false);
+    }
+  };
+
+  const handleDevLogin = async () => {
+    setError('');
+    setIsLoading(true);
+    try {
+      const result = await signIn('DevLogin', {
+        redirect: false,
+      });
+      if (result?.error) {
+        setError(`Dev login failed: ${result.error}`);
+        setIsLoading(false);
+      } else if (result?.ok !== false) {
+        router.push('/');
+        router.refresh();
+      } else {
+        setIsLoading(false);
+      }
+    } catch (err) {
+      setError(`An error occurred: ${err instanceof Error ? err.message : 'Unknown error'}`);
       setIsLoading(false);
     }
   };
@@ -73,6 +96,27 @@ export default function LoginPage() {
             </svg>
             {isLoading ? 'Signing in...' : 'Continue with Google'}
           </button>
+
+          {isDevelopment && (
+            <>
+              <div className="relative my-8">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-stone-100"></div>
+                </div>
+                <div className="relative flex justify-center text-xs">
+                  <span className="px-3 bg-[#FDFCF8] text-stone-400 uppercase tracking-widest font-bold">Or</span>
+                </div>
+              </div>
+
+              <button
+                onClick={handleDevLogin}
+                disabled={isLoading}
+                className="w-full py-3.5 md:py-4 px-6 rounded-full border border-amber-200 bg-amber-50/50 hover:bg-amber-100/50 hover:border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 active:scale-95 text-amber-800 font-light text-sm md:text-base"
+              >
+                {isLoading ? 'Signing in...' : '🔧 Dev Login (Development Only)'}
+              </button>
+            </>
+          )}
 
           <div className="relative my-8">
             <div className="absolute inset-0 flex items-center">

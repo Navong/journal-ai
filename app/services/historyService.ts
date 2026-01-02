@@ -257,17 +257,34 @@ export const historyService = {
       });
 
       if (!response.ok) {
-        if (response.status === 500) {
-          log.warn('Database not configured, audio not saved');
-          return;
+        let errorMessage = 'Failed to save audio';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.message || errorData.error || errorMessage;
+        } catch (parseError) {
+          // If response isn't JSON, use status text
+          errorMessage = response.statusText || errorMessage;
         }
-        throw new Error('Failed to save audio');
+        
+        if (response.status === 500) {
+          log.warn('Database not configured, audio not saved', { entryId });
+          throw new Error('Database not configured');
+        }
+        
+        if (response.status === 400) {
+          log.error('Invalid audio data rejected by server', { entryId, status: response.status, errorMessage });
+          throw new Error(`Invalid audio data: ${errorMessage}`);
+        }
+        
+        log.error('Failed to save audio', { entryId, status: response.status, errorMessage });
+        throw new Error(`Failed to save audio: ${errorMessage} (${response.status})`);
       }
 
       log.info(`Successfully saved audio for entry ${entryId}`);
     } catch (error) {
-      log.error('Failed to save audio', {}, error as Error);
-      // Don't throw - audio save failure shouldn't break the app
+      log.error('Failed to save audio', { entryId }, error as Error);
+      // Re-throw so caller can handle it appropriately
+      throw error;
     }
   },
 
