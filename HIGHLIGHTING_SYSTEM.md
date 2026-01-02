@@ -54,10 +54,11 @@ The app uses **AI-detected semantic highlighting** to create a sophisticated vis
 ```
 
 ### Frontend (Visual Rendering)
-1. **Phrase Matching:** Frontend finds exact phrase matches in the reflection text
-2. **Smart Styling:** Applies category-specific CSS classes
-3. **Tooltips:** Hover over highlights to see category labels
-4. **No Overlap:** Prevents choppy highlighting by removing overlapping matches
+1. **Markdown Processing:** Uses ReactMarkdown to render formatting (**bold**, *italic*, etc.)
+2. **Phrase Matching:** Recursively finds exact phrase matches in text nodes
+3. **Smart Styling:** Applies category-specific CSS classes while preserving markdown
+4. **Tooltips:** Hover over highlights to see category labels
+5. **No Overlap:** Prevents choppy highlighting by removing overlapping matches
 
 ## UI Benefits
 

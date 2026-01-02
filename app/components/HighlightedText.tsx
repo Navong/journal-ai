@@ -3,6 +3,7 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Highlight, HighlightType } from '../types';
+import { Components } from 'react-markdown';
 
 interface HighlightedTextProps {
   content: string;
@@ -16,9 +17,11 @@ interface HighlightedTextProps {
  * 2. Identity Anchors - Strengths/achievements (gold/yellow)
  * 3. External Stressors - People/events causing stress (grey/purple)
  * 4. Emotional Shifts - Emotion changes (blue/italic)
+ * 
+ * Also processes markdown syntax (bold, italic, etc.)
  */
 export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highlights }) => {
-  // If no highlights provided, render plain text
+  // If no highlights provided, render with markdown only
   if (!highlights || highlights.length === 0) {
     return (
       <div className="text-stone-800 text-base leading-[1.8]">
@@ -51,102 +54,6 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highl
     }
   };
 
-  // Helper to escape special regex characters
-  const escapeRegex = (str: string): string => {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  };
-
-  // Build list of all matches in the text
-  const allMatches: Array<{ 
-    start: number; 
-    end: number; 
-    text: string; 
-    className: string; 
-    type: HighlightType 
-  }> = [];
-
-  highlights.forEach(highlight => {
-    if (!highlight.text || !highlight.text.trim()) return;
-
-    // Find all occurrences of this phrase in the content
-    const regex = new RegExp(`\\b(${escapeRegex(highlight.text.trim())})\\b`, 'gi');
-    let match;
-    
-    while ((match = regex.exec(content)) !== null) {
-      allMatches.push({
-        start: match.index,
-        end: match.index + match[0].length,
-        text: match[0],
-        className: getStyleForType(highlight.type),
-        type: highlight.type
-      });
-    }
-  });
-
-  // If no matches found, render plain text
-  if (allMatches.length === 0) {
-    return (
-      <div className="text-stone-800 text-base leading-[1.8]">
-        <ReactMarkdown>{content}</ReactMarkdown>
-      </div>
-    );
-  }
-
-  // Sort by start position
-  allMatches.sort((a, b) => a.start - b.start);
-
-  // Remove overlapping matches (keep first occurrence)
-  const filteredMatches: typeof allMatches = [];
-  let lastEnd = -1;
-  
-  allMatches.forEach(match => {
-    if (match.start >= lastEnd) {
-      filteredMatches.push(match);
-      lastEnd = match.end;
-    }
-  });
-
-  // Build highlighted text
-  const buildHighlightedText = (): React.ReactNode[] => {
-    const result: React.ReactNode[] = [];
-    let lastIndex = 0;
-
-    filteredMatches.forEach((match, idx) => {
-      // Add text before match
-      if (match.start > lastIndex) {
-        result.push(
-          <span key={`text-${idx}`}>
-            {content.substring(lastIndex, match.start)}
-          </span>
-        );
-      }
-
-      // Add highlighted phrase
-      result.push(
-        <span
-          key={`highlight-${idx}`}
-          className={match.className}
-          title={formatTypeLabel(match.type)}
-        >
-          {match.text}
-        </span>
-      );
-
-      lastIndex = match.end;
-    });
-
-    // Add remaining text
-    if (lastIndex < content.length) {
-      result.push(
-        <span key="text-final">
-          {content.substring(lastIndex)}
-        </span>
-      );
-    }
-
-    return result;
-  };
-
   // Format type label for tooltip
   const formatTypeLabel = (type: HighlightType): string => {
     switch (type) {
@@ -158,9 +65,101 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highl
     }
   };
 
+  // Helper to escape special regex characters
+  const escapeRegex = (str: string): string => {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  };
+
+  // Build a map of text -> highlight for quick lookup
+  const highlightMap = new Map<string, { type: HighlightType; className: string }>();
+  highlights.forEach(highlight => {
+    if (highlight.text && highlight.text.trim()) {
+      const normalized = highlight.text.trim().toLowerCase();
+      highlightMap.set(normalized, {
+        type: highlight.type,
+        className: getStyleForType(highlight.type)
+      });
+    }
+  });
+
+  // Custom text renderer that applies highlights
+  const applyHighlights = (text: string): React.ReactNode => {
+    if (!text || highlightMap.size === 0) return text;
+
+    // Build regex pattern for all highlight phrases
+    const patterns = Array.from(highlightMap.keys()).map(escapeRegex);
+    if (patterns.length === 0) return text;
+    
+    const regex = new RegExp(`\\b(${patterns.join('|')})\\b`, 'gi');
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match;
+    let matchIndex = 0;
+
+    while ((match = regex.exec(text)) !== null) {
+      // Add text before match
+      if (match.index > lastIndex) {
+        parts.push(text.substring(lastIndex, match.index));
+      }
+
+      // Add highlighted phrase
+      const matchedText = match[0];
+      const normalized = matchedText.toLowerCase();
+      const highlightData = highlightMap.get(normalized);
+
+      if (highlightData) {
+        parts.push(
+          <span
+            key={`highlight-${matchIndex++}`}
+            className={highlightData.className}
+            title={formatTypeLabel(highlightData.type)}
+          >
+            {matchedText}
+          </span>
+        );
+      } else {
+        parts.push(matchedText);
+      }
+
+      lastIndex = match.index + matchedText.length;
+    }
+
+    // Add remaining text
+    if (lastIndex < text.length) {
+      parts.push(text.substring(lastIndex));
+    }
+
+    return parts.length > 0 ? <>{parts}</> : text;
+  };
+
+  // Recursively process all children to apply highlights to text nodes
+  const processNode = (node: React.ReactNode): React.ReactNode => {
+    if (typeof node === 'string') {
+      return applyHighlights(node);
+    }
+    
+    if (React.isValidElement(node) && node.props) {
+      const props = node.props as any;
+      const children = props.children;
+      if (children) {
+        const processedChildren = React.Children.map(children, child => processNode(child));
+        return React.cloneElement(node, { ...props, children: processedChildren });
+      }
+    }
+    
+    return node;
+  };
+
+  // Custom components for ReactMarkdown that apply highlights
+  const components: Components = {
+    p: ({ children }) => <p>{processNode(children)}</p>,
+    strong: ({ children }) => <strong>{processNode(children)}</strong>,
+    em: ({ children }) => <em>{processNode(children)}</em>,
+  };
+
   return (
     <div className="text-stone-800 text-base leading-[1.8]">
-      {buildHighlightedText()}
+      <ReactMarkdown components={components}>{content}</ReactMarkdown>
     </div>
   );
 };
