@@ -1197,9 +1197,37 @@ export const generateSpeech = async (
   text: string,
   options?: { useCache?: boolean; chunked?: boolean }
 ): Promise<string | string[] | undefined> => {
-  const { useCache = false, chunked = false } = options || {};
+  const { useCache = true, chunked = false } = options || {};
 
-  // Check cache if enabled (will be handled by caller)
+  // ========================================
+  // LAYER 1: Check IndexedDB Cache (Local, Instant)
+  // ========================================
+  if (useCache && typeof window !== 'undefined') {
+    try {
+      const { audioCache } = await import('../utils/audioCache');
+      const cached = await audioCache.get(text);
+      if (cached) {
+        log.debug('TTS Cache Hit: IndexedDB', { 
+          textLength: text.length,
+          audioLength: typeof cached === 'string' ? cached.length : 'array'
+        });
+        return cached;
+      }
+      log.debug('TTS Cache Miss: IndexedDB', { textLength: text.length });
+    } catch (error) {
+      log.warn('IndexedDB cache check failed', {}, error as Error);
+      // Continue to generation if cache check fails
+    }
+  }
+
+  // ========================================
+  // LAYER 2: Check Supabase is handled by caller (handleHistoryAudioPlayback)
+  // for history entries since audio is stored by entry ID, not text hash
+  // ========================================
+
+  // ========================================
+  // LAYER 3: Generate from API or return pending request
+  // ========================================
 
   // Create hash for request deduplication
   const textHash = text.trim().toLowerCase();
@@ -1207,6 +1235,7 @@ export const generateSpeech = async (
   // Check if there's already a pending request for this text
   const pendingRequest = pendingTTSRequests.get(textHash);
   if (pendingRequest) {
+    log.debug('TTS: Returning pending request', { textLength: text.length });
     return pendingRequest;
   }
 
@@ -1266,6 +1295,22 @@ export const generateSpeech = async (
       }
     }
 
+    // Save chunked result to cache (store all chunks together)
+    if (results.length > 0 && useCache && typeof window !== 'undefined') {
+      try {
+        const { audioCache } = await import('../utils/audioCache');
+        // For chunked audio, we can store the first chunk for cache hit
+        // (full playback will use all chunks, but cache hit detection uses first chunk)
+        await audioCache.set(text, results[0]);
+        log.debug('TTS: Saved chunked audio to IndexedDB cache', { 
+          chunks: results.length,
+          textLength: text.length 
+        });
+      } catch (error) {
+        log.warn('Failed to save chunked audio to cache', {}, error as Error);
+      }
+    }
+
     return results.length > 0 ? results : undefined;
   }
 
@@ -1276,6 +1321,19 @@ export const generateSpeech = async (
   try {
     const result = await request;
     pendingTTSRequests.delete(textHash);
+    
+    // Save to IndexedDB cache after successful generation
+    if (result && useCache && typeof window !== 'undefined') {
+      try {
+        const { audioCache } = await import('../utils/audioCache');
+        await audioCache.set(text, result);
+        log.debug('TTS: Saved to IndexedDB cache', { textLength: text.length });
+      } catch (error) {
+        log.warn('Failed to save to IndexedDB cache', {}, error as Error);
+        // Don't throw - generation succeeded, cache save is optional
+      }
+    }
+    
     return result;
   } catch (error) {
     pendingTTSRequests.delete(textHash);
