@@ -182,48 +182,88 @@ function extractContext(text: string, entity: string): string {
 }
 
 /**
+ * Get confidence level for entity based on recurrence
+ * Used to determine appropriate recall language
+ */
+function getEntityConfidenceLevel(occurrence: EntityOccurrence): 'high' | 'medium' | 'low' {
+  // High confidence: mentioned 3+ times recently
+  if (occurrence.totalCount >= 3) return 'high';
+  // Medium confidence: mentioned twice
+  if (occurrence.totalCount >= 2) return 'medium';
+  // Low confidence: single mention
+  return 'low';
+}
+
+/**
+ * Get recall language hint based on confidence
+ */
+function getRecallLanguageHint(confidence: 'high' | 'medium' | 'low'): string {
+  switch (confidence) {
+    case 'high':
+      return 'Use: "You mentioned..."';
+    case 'medium':
+      return 'Use: "It seems like..."';
+    case 'low':
+      return 'Use: "This might connect to..."';
+  }
+}
+
+/**
  * Format entity context for AI prompt
+ * Updated for MMA architecture with confidence-aware language hints
  */
 export function formatEntityContextForPrompt(context: EntityContext): string {
   const parts: string[] = [];
   
-  // Recent people
+  // Recent people with confidence labels
   if (context.recentPeople.length > 0) {
     parts.push('**People mentioned recently:**');
     context.recentPeople.forEach(person => {
-      const timesText = person.totalCount > 1 
-        ? ` (mentioned ${person.totalCount} times across entries)`
-        : '';
-      parts.push(`- ${person.entity}${timesText}`);
+      const confidence = getEntityConfidenceLevel(person);
+      const confidenceLabel = `[${confidence.toUpperCase()} CONFIDENCE]`;
+      const languageHint = getRecallLanguageHint(confidence);
       
-      // Show recent context
+      const timesText = person.totalCount > 1 
+        ? ` (${person.totalCount} mentions)`
+        : '';
+      parts.push(`- ${person.entity}${timesText} ${confidenceLabel}`);
+      parts.push(`  ${languageHint}`);
+      
+      // Show recent context (without specific dates to avoid timestamp hallucinations)
       const recentOccurrence = person.occurrences[person.occurrences.length - 1];
       if (recentOccurrence.context) {
-        parts.push(`  Last context: "${recentOccurrence.context}"`);
+        parts.push(`  Context: "${recentOccurrence.context}"`);
       }
     });
     parts.push('');
   }
   
-  // Recent places
+  // Recent places with confidence labels
   if (context.recentPlaces.length > 0) {
     parts.push('**Places mentioned recently:**');
     context.recentPlaces.forEach(place => {
+      const confidence = getEntityConfidenceLevel(place);
+      const confidenceLabel = `[${confidence.toUpperCase()} CONFIDENCE]`;
+      const languageHint = getRecallLanguageHint(confidence);
+      
       const timesText = place.totalCount > 1 
-        ? ` (mentioned ${place.totalCount} times)`
+        ? ` (${place.totalCount} mentions)`
         : '';
-      parts.push(`- ${place.entity}${timesText}`);
+      parts.push(`- ${place.entity}${timesText} ${confidenceLabel}`);
+      parts.push(`  ${languageHint}`);
     });
     parts.push('');
   }
   
-  // Upcoming events/deadlines (most important for detail-oriented response)
+  // Upcoming events/deadlines (HIGH CONFIDENCE - user explicitly mentioned)
   if (context.upcomingEvents.length > 0) {
-    parts.push('**⚠️ Upcoming events/deadlines:**');
+    parts.push('**⚠️ Upcoming events/deadlines:** [HIGH CONFIDENCE]');
+    parts.push('  Use: "You mentioned..." or reference directly');
     context.upcomingEvents.forEach(event => {
+      // Use relative date format to avoid specific timestamp issues
       const dateStr = event.date ? formatDate(event.date) : '';
       const urgentTag = event.deadline ? ' [DEADLINE]' : '';
-      parts.push(`- ${event.name}${urgentTag}${dateStr ? ` on ${dateStr}` : ''}`);
+      parts.push(`- ${event.name}${urgentTag}${dateStr ? ` (${dateStr})` : ''}`);
       if (event.description) {
         parts.push(`  Context: "${event.description}"`);
       }
@@ -233,7 +273,8 @@ export function formatEntityContextForPrompt(context: EntityContext): string {
   
   // Recent events (non-future) - only show if no upcoming events
   if (context.recentEvents.length > 0 && context.upcomingEvents.length === 0) {
-    parts.push('**Recent events mentioned:**');
+    parts.push('**Recent events mentioned:** [MEDIUM CONFIDENCE]');
+    parts.push('  Use: "It seems like..." or "There may be..."');
     context.recentEvents.slice(0, 3).forEach(event => {
       parts.push(`- ${event.name}`);
       if (event.description) {
@@ -243,9 +284,10 @@ export function formatEntityContextForPrompt(context: EntityContext): string {
     parts.push('');
   }
   
-  // Recurring entities (shows patterns)
+  // Recurring entities (HIGH CONFIDENCE - pattern detected)
   if (context.recurringEntities.length > 0) {
-    parts.push('**Recurring themes (frequently mentioned):**');
+    parts.push('**Recurring themes (patterns detected):** [HIGH CONFIDENCE]');
+    parts.push('  Use: "You\'ve mentioned..." or "This seems to be..."');
     context.recurringEntities.forEach(entity => {
       parts.push(`- ${entity.entity} (${entity.type}, ${entity.totalCount} mentions)`);
     });
@@ -255,6 +297,10 @@ export function formatEntityContextForPrompt(context: EntityContext): string {
   if (parts.length === 0) {
     return 'No specific entities tracked yet from recent entries.';
   }
+  
+  // Add reminder about MMA recall rules
+  parts.push('---');
+  parts.push('**⚠️ RECALL RULES:** Never use specific dates/timestamps unless the user mentioned them. Use confidence-appropriate language above.');
   
   return parts.join('\n');
 }

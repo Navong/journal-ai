@@ -15,11 +15,28 @@ export interface ExtractedEntities {
   organizations: string[]; // Companies, schools, groups
 }
 
-export type HighlightType = 'somatic_stressor' | 'identity_win' | 'main_idea';
+// Highlight types for semantic highlighting
+// - somatic_stressor: Physical symptoms OR external pressures (red)
+// - moment_of_agency: Moments of action/voice, NOT celebratory (gold)
+// - main_idea: Core insight or central observation (emphasized)
+export type HighlightType = 'somatic_stressor' | 'moment_of_agency' | 'main_idea';
+
+// Legacy alias for backward compatibility
+export type LegacyHighlightType = 'somatic_stressor' | 'identity_win' | 'main_idea';
 
 export interface Highlight {
   text: string;           // The exact phrase to highlight
-  type: HighlightType;    // Category of highlight
+  type: HighlightType | 'identity_win';    // Category of highlight (identity_win for backward compat)
+}
+
+/**
+ * MMA Reflection Structure (Mirror → Meaning → Anchor)
+ * Each section serves a distinct purpose in the reflection
+ */
+export interface MMAReflection {
+  mirror: string;         // What is happening - reflect emotions, name tensions
+  meaning: string;        // What this feeling signals - orientation, not solutions
+  anchor: string;         // Emotional stabilization - 1-2 sentences max
 }
 
 export interface Reflection {
@@ -28,6 +45,7 @@ export interface Reflection {
   timestamp: Date;
   topic?: string;         // Detected topic of the journal entry
   highlights?: Highlight[]; // AI-detected phrases to highlight
+  mma?: MMAReflection;    // MMA sections if available
 }
 
 export interface ChatMessage {
@@ -56,6 +74,7 @@ export interface HistoryEntry {
   audioBase64?: string | string[]; // Store audio for history entries
   entities?: ExtractedEntities; // Extracted entities (people, places, events, organizations)
   highlights?: Highlight[]; // AI-detected phrases to highlight in reflection text
+  mma?: MMAReflection; // MMA sections (mirror, meaning, anchor) if available
 }
 
 export enum AppStatus {
