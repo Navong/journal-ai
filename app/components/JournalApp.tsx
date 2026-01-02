@@ -142,7 +142,8 @@ const JournalApp: React.FC = () => {
   const [playbackRate, setPlaybackRate] = useState(1.0);
   const [currentAudioBase64, setCurrentAudioBase64] = useState<string | string[] | null>(null);
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
-  const [autoPlayEnabled, setAutoPlayEnabled] = useState<boolean>(true); // Default to true, will hydrate from localStorage
+  const [autoPlayEnabled, setAutoPlayEnabled] = useState<boolean>(false); // Default to false until preferences load
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false); // Track if preferences have been loaded
 
   const [activeAudioId, setActiveAudioId] = useState<string | number | null>(null);
   const [generatingAudioId, setGeneratingAudioId] = useState<string | number | null>(null);
@@ -286,7 +287,10 @@ const JournalApp: React.FC = () => {
             const savedAutoPlay = localStorage.getItem(currentAutoPlayKey);
             if (savedAutoPlay !== null) {
               setAutoPlayEnabled(savedAutoPlay === 'true');
+            } else {
+              setAutoPlayEnabled(false); // Default to false for new demo users
             }
+            setPreferencesLoaded(true); // Mark preferences as loaded
           } else if (currentUserId) {
             // Authenticated: use Supabase
             try {
@@ -318,7 +322,10 @@ const JournalApp: React.FC = () => {
               if (preferences) {
                 setAutoPlayEnabled(preferences.auto_play_enabled);
                 console.log(`[JournalApp] ✅ Set autoPlayEnabled to ${preferences.auto_play_enabled}`);
+              } else {
+                setAutoPlayEnabled(false); // Default to false if no preferences found
               }
+              setPreferencesLoaded(true); // Mark preferences as loaded
 
               // Migrate localStorage data to Supabase if exists
               const legacyHistory = localStorage.getItem(LEGACY_HISTORY_KEY);
@@ -371,6 +378,15 @@ const JournalApp: React.FC = () => {
               } else {
                 setHistory([]);
               }
+              
+              // Load auto-play preference from localStorage as fallback
+              const savedAutoPlay = localStorage.getItem(currentAutoPlayKey);
+              if (savedAutoPlay !== null) {
+                setAutoPlayEnabled(savedAutoPlay === 'true');
+              } else {
+                setAutoPlayEnabled(false);
+              }
+              setPreferencesLoaded(true);
             }
           } else if (authStatus === 'authenticated' && session && !currentUserId && !isDemoMode) {
             // Session exists but no userId - might be loading or userId not set
@@ -380,6 +396,8 @@ const JournalApp: React.FC = () => {
           } else {
             // No session and not demo mode
             setHistory([]);
+            setAutoPlayEnabled(false);
+            setPreferencesLoaded(true);
           }
 
           // Update refs AFTER data is loaded (only if we actually loaded)
