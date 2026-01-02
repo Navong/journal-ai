@@ -1443,7 +1443,9 @@ const JournalApp: React.FC = () => {
 
       // Only auto-generate audio if auto-play is enabled
       // If auto-play is disabled, audio will be generated on-demand when user clicks play
+      console.log(`[JournalApp] Auto-play enabled: ${autoPlayEnabled}, Preferences loaded: ${preferencesLoaded}`);
       if (autoPlayEnabled) {
+        console.log('[JournalApp] Auto-generating audio because auto-play is enabled');
         setIsGeneratingVoice(true);
         setGeneratingAudioId('main');
 
@@ -1542,10 +1544,12 @@ const JournalApp: React.FC = () => {
             console.error('Auto TTS generation error:', error);
             showToast('Error generating speech automatically.', 'error');
           } finally {
-            setIsGeneratingVoice(false);
-            setGeneratingAudioId(null);
-          }
-        })();
+          setIsGeneratingVoice(false);
+          setGeneratingAudioId(null);
+        }
+      })();
+      } else {
+        console.log('[JournalApp] Skipping audio generation - auto-play is disabled');
       }
 
       setTimeout(() => {
@@ -2119,7 +2123,11 @@ const JournalApp: React.FC = () => {
           <button className={`transition-colors ${viewMode === ViewMode.HISTORY ? 'text-emerald-700 font-bold' : 'hover:text-stone-600'}`} onClick={() => setViewMode(ViewMode.HISTORY)}>History</button>
           <button
             className="hover:text-stone-600 transition-colors flex items-center gap-1"
-            onClick={() => setAutoPlayEnabled(!autoPlayEnabled)}
+            onClick={() => {
+              const newValue = !autoPlayEnabled;
+              console.log(`[JournalApp] Toggling auto-play from ${autoPlayEnabled} to ${newValue}`);
+              setAutoPlayEnabled(newValue);
+            }}
             title={autoPlayEnabled ? 'Disable auto-play' : 'Enable auto-play'}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 ${autoPlayEnabled ? 'text-emerald-600' : 'text-stone-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
