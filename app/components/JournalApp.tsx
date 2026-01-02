@@ -1902,6 +1902,14 @@ const JournalApp: React.FC = () => {
                 Syncing
               </span>
             )}
+            {/* DEBUG: Show auto-play status */}
+            <span className={`flex items-center gap-1.5 text-[9px] md:text-[10px] px-2 py-0.5 md:py-1 rounded-full uppercase tracking-widest font-bold border ${
+              autoPlayEnabled 
+                ? 'text-emerald-600 bg-emerald-50 border-emerald-100' 
+                : 'text-stone-400 bg-stone-50 border-stone-200'
+            }`}>
+              Auto-play: {autoPlayEnabled ? 'ON' : 'OFF'}
+            </span>
           </div>
 
           <div className="flex items-center gap-2 md:gap-3">
@@ -2127,6 +2135,7 @@ const JournalApp: React.FC = () => {
               const newValue = !autoPlayEnabled;
               console.log(`[JournalApp] Toggling auto-play from ${autoPlayEnabled} to ${newValue}`);
               setAutoPlayEnabled(newValue);
+              showToast(`Auto-play ${newValue ? 'enabled' : 'disabled'}`, 'success');
             }}
             title={autoPlayEnabled ? 'Disable auto-play' : 'Enable auto-play'}
           >
