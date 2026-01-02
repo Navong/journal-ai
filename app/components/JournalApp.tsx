@@ -861,14 +861,22 @@ const JournalApp: React.FC = () => {
           const remainingTime = timingInfo.expectedDurationMs - timeElapsed;
 
           // The onended event often fires early (especially with compressed audio from DB)
-          // Wait for the full expected duration plus a small safety buffer
-          const waitTime = Math.max(0, remainingTime) + 150; // Add 150ms safety buffer
+          // For very long audio, onended can fire 5-10+ seconds early
+          // Strategy: Wait for the full expected duration, but use a dynamic cap based on audio length
+          // to prevent infinite waits in edge cases (e.g., if buffer.duration is wrong)
+          const waitTime = Math.max(0, remainingTime) + 200; // Add 200ms safety buffer
           
-          // Cap at a reasonable maximum to handle edge cases where onended fires VERY early
-          // Use 15 seconds as maximum wait (increased from 2.5s to fix early stop bug)
-          const cappedWaitTime = Math.min(waitTime, 15000);
+          // Use a dynamic cap: allow waiting up to 1.5x the expected duration, with a minimum of 30s
+          // This ensures we wait long enough even if onended fires very early for long audio
+          // Example: 20s audio -> cap at 30s, 40s audio -> cap at 60s, 60s audio -> cap at 90s
+          const dynamicCap = Math.max(30000, timingInfo.expectedDurationMs * 1.5);
+          const cappedWaitTime = Math.min(waitTime, dynamicCap);
 
-          console.log(`[playAudioChunk] onended fired after ${timeElapsed.toFixed(0)}ms, expected ${timingInfo.expectedDurationMs.toFixed(0)}ms, waiting ${cappedWaitTime.toFixed(0)}ms more (${waitTime > 15000 ? 'capped from ' + waitTime.toFixed(0) + 'ms' : 'uncapped'})`);
+          if (waitTime > dynamicCap) {
+            console.warn(`[playAudioChunk] onended fired very early: ${timeElapsed.toFixed(0)}ms elapsed, expected ${timingInfo.expectedDurationMs.toFixed(0)}ms. Waiting ${cappedWaitTime.toFixed(0)}ms (capped from ${waitTime.toFixed(0)}ms, dynamic cap: ${dynamicCap.toFixed(0)}ms)`);
+          } else {
+            console.log(`[playAudioChunk] onended fired after ${timeElapsed.toFixed(0)}ms, expected ${timingInfo.expectedDurationMs.toFixed(0)}ms, waiting ${cappedWaitTime.toFixed(0)}ms more`);
+          }
 
           setTimeout(() => {
             // Only call onComplete if playback should continue
