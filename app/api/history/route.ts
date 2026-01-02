@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/app/auth';
 import { prisma } from '@/app/utils/prisma';
 import logger from '@/app/utils/logger';
+import { normalizeUserId } from '@/app/utils/userIdMigration';
 
 const log = logger;
 
@@ -16,8 +17,23 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
   }
 
-  // Extract userId from NextAuth session
-  const userId = session.user.id;
+  // Extract userId from NextAuth session (already hashed)
+  let userId = session.user.id;
+  
+  // Check if user has email in session and migrate old format data if needed
+  // This handles users who had data stored with plain email IDs before the hash update
+  if (session.user.email && userId.startsWith('usr_')) {
+    try {
+      const { migrateUserDataByEmail } = await import('@/app/utils/userIdMigration');
+      const migrationResult = await migrateUserDataByEmail(session.user.email, userId);
+      if (migrationResult.entriesMigrated > 0 || migrationResult.preferencesMigrated) {
+        log.info(`[Migration] Migrated data for ${session.user.email.substring(0, 5)}***: ${migrationResult.entriesMigrated} entries, preferences: ${migrationResult.preferencesMigrated}`);
+      }
+    } catch (migrationError) {
+      log.error('[Migration] Failed to migrate user data by email', { email: session.user.email?.substring(0, 5) + '***' }, migrationError as Error);
+      // Continue with current userId even if migration fails
+    }
+  }
 
   try {
     const { searchParams } = new URL(request.url);
@@ -241,8 +257,21 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
   }
 
-  // Extract userId from NextAuth session
-  const userId = session.user.id;
+  // Extract userId from NextAuth session (already hashed)
+  let userId = session.user.id;
+  
+  // Check if user has email in session and migrate old format data if needed
+  if (session.user.email && userId.startsWith('usr_')) {
+    try {
+      const { migrateUserDataByEmail } = await import('@/app/utils/userIdMigration');
+      const migrationResult = await migrateUserDataByEmail(session.user.email, userId);
+      if (migrationResult.entriesMigrated > 0 || migrationResult.preferencesMigrated) {
+        log.info(`[Migration] Migrated data for ${session.user.email.substring(0, 5)}***: ${migrationResult.entriesMigrated} entries, preferences: ${migrationResult.preferencesMigrated}`);
+      }
+    } catch (migrationError) {
+      log.error('[Migration] Failed to migrate user data by email', { email: session.user.email?.substring(0, 5) + '***' }, migrationError as Error);
+    }
+  }
 
   let entryId: string | null = null;
   try {

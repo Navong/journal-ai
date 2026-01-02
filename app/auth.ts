@@ -2,6 +2,18 @@ import NextAuth, { type DefaultSession } from "next-auth"
 import Google from "next-auth/providers/google"
 import Credentials from "next-auth/providers/credentials"
 import type { NextAuthConfig } from "next-auth"
+// Dynamic import to avoid Edge Runtime issues - only import when needed (in JWT callback which runs in Node.js)
+let hashEmailForUserId: ((email: string) => string) | null = null;
+
+// Lazy load the hash function only in Node.js runtime
+function getHashFunction() {
+  if (!hashEmailForUserId) {
+    // Only import in Node.js runtime (JWT callbacks run in Node.js)
+    const encryption = require("@/app/utils/encryption");
+    hashEmailForUserId = encryption.hashEmailForUserId;
+  }
+  return hashEmailForUserId;
+}
 
 declare module "next-auth" {
   interface Session {
@@ -55,22 +67,39 @@ export const authConfig = {
   callbacks: {
     async jwt({ token, user, account, profile }) {
       if (user) {
-        // Use email as the stable user identifier for all providers
-        // This ensures the same user always gets the same ID regardless of login method
+        // SECURITY: Hash email to create secure user ID instead of storing plain email
+        // This prevents email addresses (including Gmail) from being stored in plain text
+        // The hash is deterministic - same email ALWAYS produces same hash
+        // This ensures users can access their data after logout/login
+        // Note: JWT callbacks run in Node.js runtime, so we can use Node.js crypto
+        const hashFn = getHashFunction();
+        
+        if (!hashFn) {
+          console.error('[NextAuth] Failed to load hash function');
+          return token;
+        }
+        
         if (user.email) {
-          token.id = user.email
-          console.log(`[NextAuth] Setting stable user ID to email: ${user.email}`)
+          const hashedId = hashFn(user.email);
+          token.id = hashedId;
+          console.log(`[NextAuth] User ID set: ${hashedId.substring(0, 20)}... (from email: ${user.email.substring(0, 5)}***)`);
         } else if (account?.providerAccountId) {
-          // Fallback to provider account ID (Google's sub, etc.)
-          // For Google: this is the stable 'sub' claim
-          token.id = account.providerAccountId
-          console.log(`[NextAuth] Setting user ID to provider account ID: ${token.id}`)
+          // For OAuth providers without email, hash the provider account ID
+          // For Google: this is the stable 'sub' claim which is always the same
+          const hashedId = hashFn(account.providerAccountId);
+          token.id = hashedId;
+          console.log(`[NextAuth] User ID set: ${hashedId.substring(0, 20)}... (from provider account ID)`);
         } else if (user.id) {
-          // Last fallback to user.id
-          token.id = user.id
-          console.log(`[NextAuth] Setting user ID to user.id: ${user.id}`)
+          // Last fallback: hash the user.id
+          const hashedId = hashFn(user.id);
+          token.id = hashedId;
+          console.log(`[NextAuth] User ID set: ${hashedId.substring(0, 20)}... (from user.id)`);
         } else {
-          console.error('[NextAuth] No user identifier found!', { user, account, profile })
+          console.error('[NextAuth] No user identifier found!', { 
+            hasEmail: !!user.email, 
+            hasProviderAccountId: !!account?.providerAccountId,
+            hasUserId: !!user.id 
+          });
         }
       }
       return token
