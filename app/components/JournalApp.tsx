@@ -1071,8 +1071,13 @@ const JournalApp: React.FC = () => {
       gainNode.connect(ctx.destination);
 
       return new Promise<void>((resolve) => {
+        // Detect iOS device for special timing handling
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        
         // Track playback start time to ensure full duration plays
         // The onended event can fire 1-2 seconds early with compressed audio from database
+        // iOS Safari has known issues with onended firing early consistently
         // Use an object so we can update the time when playback actually starts
         const timingInfo = {
           startTime: Date.now(), // Will be updated when playback actually starts
@@ -1092,14 +1097,24 @@ const JournalApp: React.FC = () => {
           const timeElapsed = Date.now() - timingInfo.startTime;
           const remainingTime = timingInfo.expectedDurationMs - timeElapsed;
 
-          // The onended event often fires early (especially with compressed audio from DB)
-          // For very long audio, onended can fire 5-10+ seconds early
-          // Strategy: Wait for the full expected duration, but use a dynamic cap based on audio length
-          // to prevent infinite waits in edge cases (e.g., if buffer.duration is wrong)
-          const waitTime = Math.max(0, remainingTime) + 200; // Add 200ms safety buffer
+          // iOS-specific handling: onended fires 1-2 seconds early consistently
+          // For iOS, we need a larger buffer and should trust buffer.duration more
+          let safetyBuffer: number;
+          if (isIOS) {
+            // iOS: Add 1.5-2 second buffer to account for consistent early firing
+            // Also add extra buffer based on audio length (longer audio = more early)
+            const iosBuffer = Math.max(1500, Math.min(2000, timingInfo.expectedDurationMs * 0.1));
+            safetyBuffer = iosBuffer;
+            console.log(`[playAudioChunk] iOS device detected, using ${iosBuffer.toFixed(0)}ms buffer`);
+          } else {
+            // Other platforms: 200ms buffer is usually sufficient
+            safetyBuffer = 200;
+          }
+          
+          const waitTime = Math.max(0, remainingTime) + safetyBuffer;
           
           // Use a dynamic cap: allow waiting up to 1.5x the expected duration, with a minimum of 30s
-          // This ensures we wait long enough even if onended fires very early for long audio
+          // For iOS, we're more aggressive since we know onended fires early
           // Example: 20s audio -> cap at 30s, 40s audio -> cap at 60s, 60s audio -> cap at 90s
           const dynamicCap = Math.max(30000, timingInfo.expectedDurationMs * 1.5);
           const cappedWaitTime = Math.min(waitTime, dynamicCap);
@@ -1107,7 +1122,8 @@ const JournalApp: React.FC = () => {
           if (waitTime > dynamicCap) {
             console.warn(`[playAudioChunk] onended fired very early: ${timeElapsed.toFixed(0)}ms elapsed, expected ${timingInfo.expectedDurationMs.toFixed(0)}ms. Waiting ${cappedWaitTime.toFixed(0)}ms (capped from ${waitTime.toFixed(0)}ms, dynamic cap: ${dynamicCap.toFixed(0)}ms)`);
           } else {
-            console.log(`[playAudioChunk] onended fired after ${timeElapsed.toFixed(0)}ms, expected ${timingInfo.expectedDurationMs.toFixed(0)}ms, waiting ${cappedWaitTime.toFixed(0)}ms more`);
+            const platform = isIOS ? 'iOS' : 'other';
+            console.log(`[playAudioChunk] [${platform}] onended fired after ${timeElapsed.toFixed(0)}ms, expected ${timingInfo.expectedDurationMs.toFixed(0)}ms, waiting ${cappedWaitTime.toFixed(0)}ms more (buffer: ${safetyBuffer.toFixed(0)}ms)`);
           }
 
           setTimeout(() => {
