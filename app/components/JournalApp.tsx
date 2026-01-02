@@ -1267,6 +1267,7 @@ const JournalApp: React.FC = () => {
       if (audioResult) {
         audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
 
+<<<<<<< HEAD
         // Cache locally
         if (typeof audioResult === 'string') {
           await audioCache.set(text, audioResult);
@@ -1517,8 +1518,18 @@ const JournalApp: React.FC = () => {
                   return;
                 }
 
-                // Save optimized version if available, otherwise save original
-                const audioToSave = optimized || audioResult;
+                // Validate optimized audio before using it
+                const MIN_VALID_AUDIO_LENGTH = 1000;
+                const isValidOptimized = optimized && 
+                                         typeof optimized === 'string' && 
+                                         optimized.length >= MIN_VALID_AUDIO_LENGTH;
+
+                // Save optimized version if valid, otherwise save original
+                const audioToSave = isValidOptimized ? optimized : audioResult;
+                if (!isValidOptimized && optimized) {
+                  console.warn(`[JournalApp] Optimized audio invalid (length: ${optimized?.length}), using original`);
+                }
+                
                 historyService.saveEntryAudio(newId, audioToSave)
                       .then(() => {
                         console.log(`[JournalApp] ✅ Audio saved to database for entry ${newId}`);
