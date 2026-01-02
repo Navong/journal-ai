@@ -1267,7 +1267,6 @@ const JournalApp: React.FC = () => {
       if (audioResult) {
         audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
 
-<<<<<<< HEAD
         // Cache locally
         if (typeof audioResult === 'string') {
           await audioCache.set(text, audioResult);
