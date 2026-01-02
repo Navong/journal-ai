@@ -39,6 +39,10 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highl
         // Achievements + voice + recovery - bold with gold background
         return 'font-bold bg-amber-50 text-amber-900 px-1 py-0.5 rounded shadow-sm';
       
+      case 'main_idea':
+        // Core insight/main theme - purple background with subtle emphasis
+        return 'font-semibold bg-purple-50 text-purple-900 px-1 py-0.5 rounded border-b-2 border-purple-300';
+      
       default:
         return 'font-semibold';
     }
@@ -49,6 +53,7 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highl
     switch (type) {
       case 'somatic_stressor': return 'Somatic Stressor';
       case 'identity_win': return 'Identity Win';
+      case 'main_idea': return 'Main Idea';
       default: return 'Highlighted';
     }
   };

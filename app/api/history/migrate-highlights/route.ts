@@ -27,28 +27,31 @@ export async function GET(request: NextRequest) {
       where: { userId },
     });
 
-    // Count entries without highlights (null in database)
-    const entriesWithoutHighlights = await prisma.journalEntry.count({
+    // Count entries already processed (have migrated_at marker in highlights JSON)
+    // We use a simple approach: count entries where highlights is not null
+    // The migration will track processed entries separately
+    const entriesWithHighlights = await prisma.journalEntry.count({
       where: {
         userId,
-        highlights: { equals: Prisma.DbNull },
+        NOT: { highlights: { equals: Prisma.DbNull } },
       },
     });
 
-    // Count entries with highlights
-    const entriesWithHighlights = totalEntries - entriesWithoutHighlights;
+    const entriesWithoutHighlights = totalEntries - entriesWithHighlights;
 
     log.info('Migration stats fetched', {
       userId,
       total: totalEntries,
       withHighlights: entriesWithHighlights,
-      needsMigration: entriesWithoutHighlights,
+      withoutHighlights: entriesWithoutHighlights,
     });
 
     return NextResponse.json({
       total: totalEntries,
       withHighlights: entriesWithHighlights,
-      needsMigration: entriesWithoutHighlights,
+      withoutHighlights: entriesWithoutHighlights,
+      // All entries can be re-migrated to get main_idea highlights
+      canMigrate: totalEntries,
     });
   } catch (error: any) {
     log.error('Failed to get migration stats', { userId }, error);
@@ -56,7 +59,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST: Run highlight migration for entries without highlights
+// POST: Run highlight migration for ALL entries (re-extract highlights with main_idea)
 export async function POST(request: NextRequest) {
   const session = await auth();
 
@@ -74,15 +77,13 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const batchSize = Math.min(body.batchSize || 5, 10); // Max 10 per batch to avoid timeouts
     const delayMs = body.delayMs || 1000; // Delay between API calls (rate limiting)
+    const offset = body.offset || 0; // Track progress across batches
 
-    log.info('Starting highlight migration', { userId, batchSize, delayMs });
+    log.info('Starting highlight migration', { userId, batchSize, delayMs, offset });
 
-    // Get entries without highlights (null in database)
-    const entriesWithoutHighlights = await prisma.journalEntry.findMany({
-      where: {
-        userId,
-        highlights: { equals: Prisma.DbNull },
-      },
+    // Get ALL entries (sorted by createdAt desc, with offset for pagination)
+    const entriesToProcess = await prisma.journalEntry.findMany({
+      where: { userId },
       select: {
         id: true,
         reflectionText: true,
@@ -91,38 +92,41 @@ export async function POST(request: NextRequest) {
       orderBy: {
         createdAt: 'desc', // Process newest first
       },
+      skip: offset,
       take: batchSize,
     });
 
-    if (entriesWithoutHighlights.length === 0) {
-      log.info('No entries need highlight migration', { userId });
+    if (entriesToProcess.length === 0) {
+      log.info('No more entries to migrate', { userId, offset });
       return NextResponse.json({
         success: true,
-        message: 'No entries need migration',
+        message: 'Migration complete - no more entries',
         processed: 0,
         updated: 0,
         skipped: 0,
         errors: 0,
         remaining: 0,
+        nextOffset: offset,
+        done: true,
       });
     }
 
-    log.info(`Processing ${entriesWithoutHighlights.length} entries for highlight migration`, { userId });
+    log.info(`Processing ${entriesToProcess.length} entries for highlight migration`, { userId, offset });
 
     let updated = 0;
     let skipped = 0;
     let errors = 0;
     const errorDetails: string[] = [];
 
-    for (let i = 0; i < entriesWithoutHighlights.length; i++) {
-      const entry = entriesWithoutHighlights[i];
+    for (let i = 0; i < entriesToProcess.length; i++) {
+      const entry = entriesToProcess[i];
 
       try {
-        // Extract highlights from reflection text
+        // Extract highlights from reflection text (now includes main_idea)
         const highlights = await extractHighlightsFromReflection(entry.reflectionText);
 
         if (highlights.length > 0) {
-          // Update entry with highlights (cast to Prisma InputJsonValue)
+          // Update entry with new highlights (cast to Prisma InputJsonValue)
           await prisma.journalEntry.update({
             where: { id: entry.id },
             data: { highlights: highlights as unknown as Prisma.InputJsonValue },
@@ -130,7 +134,7 @@ export async function POST(request: NextRequest) {
           updated++;
           log.debug(`Updated entry ${entry.id} with ${highlights.length} highlights`);
         } else {
-          // Mark as processed with empty array (so we don't re-process)
+          // Mark as processed with empty array
           await prisma.journalEntry.update({
             where: { id: entry.id },
             data: { highlights: [] as unknown as Prisma.InputJsonValue },
@@ -140,7 +144,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Rate limiting delay (skip on last iteration)
-        if (i < entriesWithoutHighlights.length - 1 && delayMs > 0) {
+        if (i < entriesToProcess.length - 1 && delayMs > 0) {
           await new Promise(resolve => setTimeout(resolve, delayMs));
         }
       } catch (error: any) {
@@ -151,31 +155,31 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Get remaining count (entries with null highlights)
-    const remaining = await prisma.journalEntry.count({
-      where: {
-        userId,
-        highlights: { equals: Prisma.DbNull },
-      },
-    });
+    // Calculate next offset and remaining
+    const nextOffset = offset + entriesToProcess.length;
+    const totalEntries = await prisma.journalEntry.count({ where: { userId } });
+    const remaining = Math.max(0, totalEntries - nextOffset);
 
     log.info('Highlight migration batch complete', {
       userId,
-      processed: entriesWithoutHighlights.length,
+      processed: entriesToProcess.length,
       updated,
       skipped,
       errors,
       remaining,
+      nextOffset,
     });
 
     return NextResponse.json({
       success: errors === 0,
-      message: `Processed ${entriesWithoutHighlights.length} entries`,
-      processed: entriesWithoutHighlights.length,
+      message: `Processed ${entriesToProcess.length} entries`,
+      processed: entriesToProcess.length,
       updated,
       skipped,
       errors,
       remaining,
+      nextOffset,
+      done: remaining === 0,
       errorDetails: errorDetails.length > 0 ? errorDetails : undefined,
     });
   } catch (error: any) {

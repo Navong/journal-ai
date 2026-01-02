@@ -5,7 +5,8 @@ import { useState, useEffect, useCallback } from 'react';
 interface MigrationStats {
   total: number;
   withHighlights: number;
-  needsMigration: number;
+  withoutHighlights: number;
+  canMigrate: number;
 }
 
 interface MigrationResult {
@@ -16,6 +17,8 @@ interface MigrationResult {
   skipped: number;
   errors: number;
   remaining: number;
+  nextOffset: number;
+  done: boolean;
   errorDetails?: string[];
 }
 
@@ -33,6 +36,8 @@ export function HighlightMigration() {
   } | null>(null);
   const [batchSize, setBatchSize] = useState(5);
   const [autoRun, setAutoRun] = useState(false);
+  const [currentOffset, setCurrentOffset] = useState(0);
+  const [isDone, setIsDone] = useState(false);
 
   // Fetch migration stats
   const fetchStats = useCallback(async () => {
@@ -57,7 +62,7 @@ export function HighlightMigration() {
   }, [fetchStats]);
 
   // Run migration batch
-  const runMigration = useCallback(async () => {
+  const runMigration = useCallback(async (offset: number = currentOffset) => {
     if (migrating) return;
 
     try {
@@ -67,7 +72,7 @@ export function HighlightMigration() {
       const response = await fetch('/api/history/migrate-highlights', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ batchSize, delayMs: 1500 }),
+        body: JSON.stringify({ batchSize, delayMs: 1500, offset }),
       });
 
       const data: MigrationResult = await response.json();
@@ -84,28 +89,36 @@ export function HighlightMigration() {
         remaining: data.remaining,
       });
 
+      setCurrentOffset(data.nextOffset);
+      setIsDone(data.done);
+
       // Update stats
       await fetchStats();
 
-      // Continue auto-run if enabled and there are more entries
-      if (autoRun && data.remaining > 0) {
+      // Continue auto-run if enabled and not done
+      if (autoRun && !data.done && data.remaining > 0) {
         // Small delay before next batch
-        setTimeout(() => runMigration(), 2000);
+        setTimeout(() => runMigration(data.nextOffset), 2000);
       } else {
         setMigrating(false);
+        if (data.done) {
+          setAutoRun(false);
+        }
       }
     } catch (err: any) {
       setError(err?.message || 'Migration failed');
       setMigrating(false);
       setAutoRun(false);
     }
-  }, [migrating, batchSize, progress, autoRun, fetchStats]);
+  }, [migrating, batchSize, progress, autoRun, fetchStats, currentOffset]);
 
   // Start auto-run
   const startAutoMigration = () => {
     setAutoRun(true);
     setProgress(null);
-    runMigration();
+    setCurrentOffset(0);
+    setIsDone(false);
+    runMigration(0);
   };
 
   // Stop auto-run
@@ -116,6 +129,8 @@ export function HighlightMigration() {
   // Reset progress
   const resetProgress = () => {
     setProgress(null);
+    setCurrentOffset(0);
+    setIsDone(false);
     fetchStats();
   };
 
@@ -137,18 +152,23 @@ export function HighlightMigration() {
         <h2 className="text-xl font-semibold text-stone-800 mb-4">Migration Status</h2>
         {stats && (
           <div className="grid grid-cols-3 gap-4">
-            <div className="bg-stone-50 rounded-lg p-4 text-center">
-              <p className="text-3xl font-bold text-stone-800">{stats.total}</p>
+            <div className="bg-purple-50 rounded-lg p-4 text-center">
+              <p className="text-3xl font-bold text-purple-600">{stats.total}</p>
               <p className="text-sm text-stone-600">Total Entries</p>
-            </div>
-            <div className="bg-amber-50 rounded-lg p-4 text-center">
-              <p className="text-3xl font-bold text-amber-600">{stats.needsMigration}</p>
-              <p className="text-sm text-stone-600">Need Migration</p>
             </div>
             <div className="bg-emerald-50 rounded-lg p-4 text-center">
               <p className="text-3xl font-bold text-emerald-600">{stats.withHighlights}</p>
-              <p className="text-sm text-stone-600">With Highlights</p>
+              <p className="text-sm text-stone-600">Have Highlights</p>
             </div>
+            <div className="bg-stone-100 rounded-lg p-4 text-center">
+              <p className="text-3xl font-bold text-stone-500">{stats.withoutHighlights}</p>
+              <p className="text-sm text-stone-600">No Highlights Yet</p>
+            </div>
+          </div>
+        )}
+        {isDone && (
+          <div className="mt-4 bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-emerald-700 text-center">
+            ✓ Migration complete! All entries have been processed.
           </div>
         )}
       </div>
@@ -215,18 +235,18 @@ export function HighlightMigration() {
             {!migrating ? (
               <>
                 <button
-                  onClick={runMigration}
-                  disabled={stats?.needsMigration === 0}
+                  onClick={() => runMigration(currentOffset)}
+                  disabled={stats?.total === 0 || isDone}
                   className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   Run Single Batch
                 </button>
                 <button
                   onClick={startAutoMigration}
-                  disabled={stats?.needsMigration === 0}
-                  className="px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  disabled={stats?.total === 0}
+                  className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  Migrate All
+                  {isDone ? 'Re-Migrate All' : 'Migrate All'}
                 </button>
               </>
             ) : (
@@ -267,11 +287,12 @@ export function HighlightMigration() {
       <div className="border-t border-stone-200 pt-4 text-sm text-stone-500">
         <h4 className="font-medium text-stone-700 mb-2">How it works:</h4>
         <ul className="list-disc list-inside space-y-1">
-          <li>Scans your existing journal reflections for highlight-worthy phrases</li>
+          <li>Scans <strong>all</strong> journal reflections for highlight-worthy phrases</li>
+          <li>Identifies <span className="text-purple-600 font-medium">main ideas</span> (core insights, key takeaways)</li>
           <li>Identifies <span className="text-red-600 font-medium">stress indicators</span> (physical symptoms, external pressures)</li>
           <li>Identifies <span className="text-amber-600 font-medium">identity wins</span> (achievements, moments of agency)</li>
           <li>Preserves your original reflection text - only adds visual highlights</li>
-          <li>Entries with no meaningful highlights are marked as processed</li>
+          <li>Re-running migration will refresh highlights with latest AI analysis</li>
         </ul>
       </div>
     </div>
