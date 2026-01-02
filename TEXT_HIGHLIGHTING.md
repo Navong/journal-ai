@@ -25,67 +25,74 @@ Improved the visual presentation of AI-generated reflections with intelligent hi
 
 ### **Ultra-Clean, Minimal Design:**
 
-Uses **bold text only** - the simplest and cleanest approach.
+Uses **bold text on meaningful phrases** - the cleanest and most natural approach.
 
-#### **Important Words Get Bold**
-- **People**: Names mentioned → **Bold**
-  - Example: **Sarah**, **Mom**, **Dr. Smith**
-  
-- **Places**: Locations → **Bold**
-  - Example: **office**, **gym**, **Central Park**
-  
-- **Events**: Meetings, appointments → **Bold**
-  - Example: **presentation**, **interview**, **meeting**
-  
-- **Deadlines**: Urgent events → **Bold**
-  - Example: **deadline**, **due Friday**
-  
-- **Organizations**: Companies, teams → **Bold**
-  - Example: **Apple**, **Harvard**
+#### **Important Phrases Get Bold**
 
-- **Emotion Words**: Feelings → **Bold**
-  - Example: **anxious**, **happy**, **stressed**, **calm**
+**Emotion Phrases** (how you're feeling):
+- **feeling anxious**, **feeling stressed**, **feeling overwhelmed**
+- **feeling happy**, **feeling calm**, **feeling grateful**
 
-- **Action/Insight Words**: Key verbs → **Bold**
-  - Example: **realize**, **understand**, **notice**, **feel**
+**Insight Phrases** (realizations):
+- **starting to realize**, **I understand**, **I notice**
+- **it sounds like**, **it seems like**, **it appears**
+
+**Progress Phrases** (growth):
+- **making progress**, **moving forward**, **taking steps**
+- **working through**, **working on**
+
+**Challenge Phrases** (difficulties):
+- **struggling with**, **dealing with**, **facing challenges**
+
+**Support Phrases** (self-care):
+- **reaching out**, **asking for help**, **taking care**
+
+**Time Phrases** (deadlines/urgency):
+- **upcoming deadline**, **project deadline**, **next week**
+
+**Relationship Phrases** (interactions):
+- **talking with Sarah**, **meeting with John**, **conversation with**
+
+**Entity Names** (people, places):
+- **Sarah Johnson**, **Central Park**, **Google**, **Harvard**
 
 **Design Philosophy:**
-- ✅ No colors at all - maximum simplicity
+- ✅ No colors - maximum readability
 - ✅ No backgrounds - pure and clean
-- ✅ No underlines - not distracting
+- ✅ **Highlights phrases, not words** - natural flow
 - ✅ Just bold text - instantly recognizable
-- ✅ Minimal and elegant - focuses attention without overwhelming
+- ✅ Longer phrases prioritized - avoids choppy highlighting
 
 ---
 
 ## Examples
 
-### **Example 1: Simple Bold Highlighting**
+### **Example 1: Phrase-Based Highlighting**
 
 **Input:**
-> "I had coffee with Sarah at the office. She's stressed about the presentation on Friday."
+> "I had coffee with Sarah at the office. She's feeling stressed about the presentation on Friday."
 
 **Output with Highlighting:**
-> "I had coffee with **Sarah** at the **office**. She's **feeling** **stressed** about the **presentation** on Friday."
+> "I had coffee with **Sarah** at the **office**. She's **feeling stressed** about the **presentation** on Friday."
 
 **Visual:**
-- Important words are simply **bold**
-- No colors, no backgrounds
-- Clean and readable!
+- "feeling stressed" → Bold as one phrase (not "feeling" and "stressed" separately)
+- Entity names → Bold
+- Natural reading flow!
 
-### **Example 2: Emotion & Action Emphasis**
+### **Example 2: Insight & Emotion Phrases**
 
 **Input:**
-> "I realize I need to stay calm about the deadline. Feeling grateful for the support."
+> "I'm starting to realize I need to stay calm about the upcoming deadline. Feeling grateful for the support."
 
 **Output with Highlighting:**
-> "I **realize** I need to stay **calm** about the **deadline**. **Feeling** **grateful** for the support."
+> "I'm **starting to realize** I need to stay calm about the **upcoming deadline**. **Feeling grateful** for the support."
 
 **Visual:**
-- Key insight words: **realize**
-- Emotions: **calm**, **grateful**
-- Urgency: **deadline**
-- All just bold - super simple!
+- "starting to realize" → Bold as complete insight phrase
+- "upcoming deadline" → Bold as time phrase
+- "Feeling grateful" → Bold as emotion phrase
+- Smooth, natural reading!
 
 ---
 
@@ -246,18 +253,20 @@ It sounds like she's feeling stressed about the presentation deadline.
 It's thoughtful that you're supporting her during this time.
 ```
 
-### **With Bold Highlighting (After - Ultra Clean!):**
+### **With Phrase Highlighting (After - Natural & Clean!):**
 ```
 I hear that you had coffee with **Sarah** at the **office**. 
-It sounds like she's **feeling** **stressed** about the **presentation** **deadline**. 
+**It sounds like** she's **feeling stressed** about the **presentation deadline**. 
 It's thoughtful that you're supporting her during this time.
 ```
 
 **Design:**
-- Important words = **Bold**
-- That's it! No colors, no backgrounds, no underlines
-- Cleanest possible approach
-- Natural reading flow with emphasis where it matters
+- Important **phrases** = **Bold** (not individual words)
+- "feeling stressed" is ONE highlight (natural)
+- "presentation deadline" is ONE highlight (keeps context)
+- "It sounds like" signals insight (AI acknowledging)
+- No colors, no backgrounds, no underlines
+- Smooth reading flow with natural emphasis
 
 ---
 
