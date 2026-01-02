@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import * as Toast from '@radix-ui/react-toast';
+import { generateUUID } from './uuid';
 
 export type ToastType = 'error' | 'success' | 'info';
 
@@ -19,7 +20,7 @@ const notifyListeners = () => {
 };
 
 export const showToast = (message: string, type: ToastType = 'info') => {
-  const id = crypto.randomUUID();
+  const id = generateUUID();
   const toast: ToastData = { id, message, type };
 
   toastQueue.push(toast);

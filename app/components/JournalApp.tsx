@@ -9,6 +9,7 @@ import { ChatInterface } from './ChatInterface';
 import { Chat } from '@google/genai';
 import { audioCache } from '../utils/audioCache';
 import { showToast, ToastContainer } from '../utils/toast';
+import { generateUUID } from '../utils/uuid';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { useSession, signOut } from 'next-auth/react';
 import { historyService } from '../services/historyService';
@@ -1157,14 +1158,34 @@ const JournalApp: React.FC = () => {
                 if (userId && !isDemoMode && currentHistoryId) {
                   optimizeAudio(audioResult)
                     .then(optimized => {
-                      historyService.saveEntryAudio(currentHistoryId, optimized).catch(err => {
-                        console.warn('[JournalApp] Failed to save optimized audio:', err);
-                      });
+                      // Validate optimized audio before saving
+                      const MIN_VALID_AUDIO_LENGTH = 1000;
+                      const isValidOptimized = optimized && 
+                                               typeof optimized === 'string' && 
+                                               optimized.length >= MIN_VALID_AUDIO_LENGTH;
+                      
+                      const audioToSave = isValidOptimized ? optimized : audioResult;
+                      if (!isValidOptimized && optimized) {
+                        console.warn(`[JournalApp] Optimized audio invalid (length: ${optimized?.length}), using original`);
+                      }
+                      
+                      return historyService.saveEntryAudio(currentHistoryId, audioToSave);
+                    })
+                    .then(() => {
+                      console.log(`[JournalApp] ✅ Audio saved to database for entry ${currentHistoryId}`);
                     })
                     .catch(err => {
                       console.warn('[JournalApp] Audio optimization failed, saving original:', err);
+                      // Always save original audio even if optimization fails
                       if (audioResult) {
-                        historyService.saveEntryAudio(currentHistoryId, audioResult).catch(() => { });
+                        historyService.saveEntryAudio(currentHistoryId, audioResult)
+                          .then(() => {
+                            console.log(`[JournalApp] ✅ Original audio saved to database for entry ${currentHistoryId}`);
+                          })
+                          .catch(saveErr => {
+                            console.error('[JournalApp] Failed to save original audio to database:', saveErr);
+                            // Log error but don't throw - audio is cached locally
+                          });
                       }
                     });
                 }
@@ -1275,14 +1296,34 @@ const JournalApp: React.FC = () => {
           if (userId && !isDemoMode && historyEntry?.id) {
             optimizeAudio(audioResult)
               .then(optimized => {
-                historyService.saveEntryAudio(historyEntry.id, optimized).catch(err => {
-                  console.warn('[JournalApp] Failed to save optimized audio:', err);
-                });
+                // Validate optimized audio before saving
+                const MIN_VALID_AUDIO_LENGTH = 1000;
+                const isValidOptimized = optimized && 
+                                         typeof optimized === 'string' && 
+                                         optimized.length >= MIN_VALID_AUDIO_LENGTH;
+                
+                const audioToSave = isValidOptimized ? optimized : audioResult;
+                if (!isValidOptimized && optimized) {
+                  console.warn(`[JournalApp] Optimized audio invalid (length: ${optimized?.length}), using original`);
+                }
+                
+                return historyService.saveEntryAudio(historyEntry.id, audioToSave);
+              })
+              .then(() => {
+                console.log(`[JournalApp] ✅ Audio saved to database for entry ${historyEntry.id}`);
               })
               .catch(err => {
                 console.warn('[JournalApp] Audio optimization failed, saving original:', err);
+                // Always save original audio even if optimization fails
                 if (audioResult) {
-                  historyService.saveEntryAudio(historyEntry.id, audioResult).catch(() => { });
+                  historyService.saveEntryAudio(historyEntry.id, audioResult)
+                    .then(() => {
+                      console.log(`[JournalApp] ✅ Original audio saved to database for entry ${historyEntry.id}`);
+                    })
+                    .catch(saveErr => {
+                      console.error('[JournalApp] Failed to save original audio to database:', saveErr);
+                      // Log error but don't throw - audio is cached locally
+                    });
                 }
               });
           }
@@ -1410,7 +1451,7 @@ const JournalApp: React.FC = () => {
         highlights // Include highlights in reflection state
       };
 
-      const newId = crypto.randomUUID();
+      const newId = generateUUID();
       setCurrentHistoryId(newId);
       setReflection(newReflection);
       setStatus(AppStatus.SUCCESS);

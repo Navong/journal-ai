@@ -1,5 +1,6 @@
 import NextAuth, { type DefaultSession } from "next-auth"
 import Google from "next-auth/providers/google"
+import Credentials from "next-auth/providers/credentials"
 import type { NextAuthConfig } from "next-auth"
 
 declare module "next-auth" {
@@ -26,6 +27,27 @@ export const authConfig = {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
       allowDangerousEmailAccountLinking: true,
     }),
+    // Dev login provider (only works in development)
+    ...(process.env.NODE_ENV === 'development' ? [
+      Credentials({
+        id: "DevLogin",
+        name: "DevLogin",
+        credentials: {},
+        async authorize(credentials) {
+          // Only allow in development environment
+          if (process.env.NODE_ENV !== 'development') {
+            return null
+          }
+          // Simple dev login - no credentials needed
+          // User ID is dev@admin for database storage
+          return {
+            id: 'dev@admin',
+            email: 'dev@admin',
+            name: 'Dev User',
+          }
+        },
+      }),
+    ] : []),
   ],
   pages: {
     signIn: "/login",
