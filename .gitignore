@@ -33,3 +33,4 @@ dist
 
 /app/generated/prisma
 .vercel
+tsconfig.tsbuildinfo
