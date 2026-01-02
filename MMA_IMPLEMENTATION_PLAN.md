@@ -426,7 +426,31 @@ responseSchema: {
 
 ---
 
-### 2.3 Reflection Assembly
+### 2.3 Anchor Compassion Rule (CRITICAL)
+
+**Problem Solved:** Users feeling "analyzed but not accompanied"
+
+The anchor MUST contain **felt care**, not just logical statements.
+
+**The implicit question users ask:** "Am I okay to be here like this?"
+**The anchor must answer:** "Yes, and you're not alone in it."
+
+| ❌ Cold (AVOID) | ✅ Warm (USE) |
+|-----------------|---------------|
+| "This feeling is allowed to exist." | "It makes sense that this feels heavy right now." |
+| "This doesn't require justification." | "You don't have to push yourself to feel different just yet." |
+| "This is a valid response." | "You're not alone in sitting with this." |
+
+**Allowed warm language:**
+- "It makes sense that this feels heavy right now."
+- "You don't have to push yourself to feel different just yet."
+- "It's okay to simply be where you are with it."
+- "You're not alone in sitting with this."
+- "This is a heavy place to be — and you're allowed to take up space here."
+
+---
+
+### 2.4 Reflection Assembly
 
 **Modify:** Return value processing
 
@@ -783,7 +807,20 @@ const systemInstruction = USE_MMA ? SYSTEM_INSTRUCTION_MMA : SYSTEM_INSTRUCTION_
 | Forbidden phrase rate | < 1% of responses |
 | Memory hallucination rate | 0% (no timestamps without user mention) |
 | Third-party safety compliance | 100% when detected |
-| User satisfaction | No increase in negative feedback |
+| **Anchor warmth compliance** | **100% of anchors contain felt presence (not clinical)** |
+| User satisfaction | Users feel "accompanied" not "analyzed" |
+
+### Emotional Presence Test
+
+After reading a reflection, the user should feel:
+- ✅ "I'm not broken. I can breathe."
+- ✅ "Someone understands where I am."
+- ✅ "I'm not alone with this."
+
+NOT:
+- ❌ "I've been analyzed but not cared for."
+- ❌ "I understand why I feel bad, but I still feel bad and alone."
+- ❌ "This is technically correct but emotionally cold."
 
 ---
 
@@ -801,7 +838,7 @@ const systemInstruction = USE_MMA ? SYSTEM_INSTRUCTION_MMA : SYSTEM_INSTRUCTION_
 **User Entry:**
 > "Saw my college friends today. They all have their lives figured out — good jobs, relationships, plans. I'm still figuring things out. Felt really small."
 
-**MMA Response:**
+**MMA Response (with Anchor Compassion Rule):**
 
 ```json
 {
@@ -809,7 +846,7 @@ const systemInstruction = USE_MMA ? SYSTEM_INSTRUCTION_MMA : SYSTEM_INSTRUCTION_
   
   "meaning": "This kind of feeling often shows up when someone is still in the middle of their own timeline, and being around people who seem further along makes that uncertainty louder. Comparison doesn't mean you're behind — it means your path isn't as visible to you yet as theirs appears to be.",
   
-  "anchor": "This doesn't mean you're failing. It means this part of your life still feels open — and open isn't the same as lost.",
+  "anchor": "It's understandable that this still weighs on you. You don't have to resolve it or rise above it right now — it's okay to simply be where you are with it.",
   
   "summary": "Comparison and uncertainty after seeing settled friends",
   "topic": "Self-Comparison",
@@ -820,6 +857,16 @@ const systemInstruction = USE_MMA ? SYSTEM_INSTRUCTION_MMA : SYSTEM_INSTRUCTION_
   ]
 }
 ```
+
+### Anchor Comparison
+
+| ❌ Cold/Clinical | ✅ Warm/Present |
+|------------------|-----------------|
+| "This feeling is allowed to exist." | "It makes sense that this feels heavy right now." |
+| "This doesn't require justification." | "You don't have to push yourself to feel different just yet." |
+| "Open isn't the same as lost." | "It's okay to simply be where you are with it." |
+
+The warm version answers the implicit question: **"Am I okay to be here like this?"**
 
 ---
 
