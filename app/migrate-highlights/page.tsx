@@ -39,8 +39,8 @@ export default function MigrateHighlightsPage() {
           </button>
           <h1 className="text-3xl font-bold text-stone-800">Text Highlight Migration</h1>
           <p className="text-stone-600 mt-2">
-            Add visual highlights to your existing journal reflections. This analyzes your past entries 
-            and identifies key phrases to highlight for better readability.
+            Add visual highlights to your journal reflections. This analyzes all your entries 
+            and identifies <span className="text-purple-600 font-medium">main ideas</span>, <span className="text-red-600 font-medium">stress indicators</span>, and <span className="text-amber-600 font-medium">identity wins</span> for better readability.
           </p>
         </div>
         <HighlightMigration />
