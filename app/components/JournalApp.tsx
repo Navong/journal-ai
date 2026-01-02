@@ -142,7 +142,8 @@ const JournalApp: React.FC = () => {
   const [playbackRate, setPlaybackRate] = useState(1.0);
   const [currentAudioBase64, setCurrentAudioBase64] = useState<string | string[] | null>(null);
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
-  const [autoPlayEnabled, setAutoPlayEnabled] = useState<boolean>(true); // Default to true, will hydrate from localStorage
+  const [autoPlayEnabled, setAutoPlayEnabled] = useState<boolean>(false); // Default to false until preferences load
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false); // Track if preferences have been loaded
 
   const [activeAudioId, setActiveAudioId] = useState<string | number | null>(null);
   const [generatingAudioId, setGeneratingAudioId] = useState<string | number | null>(null);
@@ -286,7 +287,10 @@ const JournalApp: React.FC = () => {
             const savedAutoPlay = localStorage.getItem(currentAutoPlayKey);
             if (savedAutoPlay !== null) {
               setAutoPlayEnabled(savedAutoPlay === 'true');
+            } else {
+              setAutoPlayEnabled(false); // Default to false for new demo users
             }
+            setPreferencesLoaded(true); // Mark preferences as loaded
           } else if (currentUserId) {
             // Authenticated: use Supabase
             try {
@@ -318,7 +322,10 @@ const JournalApp: React.FC = () => {
               if (preferences) {
                 setAutoPlayEnabled(preferences.auto_play_enabled);
                 console.log(`[JournalApp] ✅ Set autoPlayEnabled to ${preferences.auto_play_enabled}`);
+              } else {
+                setAutoPlayEnabled(false); // Default to false if no preferences found
               }
+              setPreferencesLoaded(true); // Mark preferences as loaded
 
               // Migrate localStorage data to Supabase if exists
               const legacyHistory = localStorage.getItem(LEGACY_HISTORY_KEY);
@@ -371,6 +378,15 @@ const JournalApp: React.FC = () => {
               } else {
                 setHistory([]);
               }
+              
+              // Load auto-play preference from localStorage as fallback
+              const savedAutoPlay = localStorage.getItem(currentAutoPlayKey);
+              if (savedAutoPlay !== null) {
+                setAutoPlayEnabled(savedAutoPlay === 'true');
+              } else {
+                setAutoPlayEnabled(false);
+              }
+              setPreferencesLoaded(true);
             }
           } else if (authStatus === 'authenticated' && session && !currentUserId && !isDemoMode) {
             // Session exists but no userId - might be loading or userId not set
@@ -380,6 +396,8 @@ const JournalApp: React.FC = () => {
           } else {
             // No session and not demo mode
             setHistory([]);
+            setAutoPlayEnabled(false);
+            setPreferencesLoaded(true);
           }
 
           // Update refs AFTER data is loaded (only if we actually loaded)
@@ -1108,39 +1126,53 @@ const JournalApp: React.FC = () => {
         setIsGeneratingVoice(true);
         setGeneratingAudioId('main');
         try {
-          // Generate with chunking for long texts
-          // IndexedDB cache is checked automatically by generateSpeech
-          const textLength = reflection.content.length;
-          const needsChunking = textLength > 1500;
-
-          const audioResult = await generateSpeech(reflection.content, {
-            useCache: true,
-            chunked: needsChunking
-          });
-
-          if (audioResult) {
-            const audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
+          // Check cache first
+          const cached = await audioCache.get(reflection.content);
+          if (cached) {
+            const audioData = typeof cached === 'string' ? cached : [cached];
             setCurrentAudioBase64(audioData);
-
-            // Automatically save to database when audio is first generated
-            if (userId && !isDemoMode && currentHistoryId && typeof audioResult === 'string') {
-              optimizeAudio(audioResult)
-                .then(optimized => {
-                  historyService.saveEntryAudio(currentHistoryId, optimized).catch(err => {
-                    console.warn('[JournalApp] Failed to save optimized audio:', err);
-                  });
-                })
-                .catch(err => {
-                  console.warn('[JournalApp] Audio optimization failed, saving original:', err);
-                  if (audioResult) {
-                    historyService.saveEntryAudio(currentHistoryId, audioResult).catch(() => { });
-                  }
-                });
-            }
-
             playAudio(audioData, 'main');
           } else {
-            showToast('Could not generate audio. Please try again.', 'error');
+            // Generate with chunking for long texts
+            const textLength = reflection.content.length;
+            const needsChunking = textLength > 1500;
+
+            const audioResult = await generateSpeech(reflection.content, {
+              chunked: needsChunking
+            });
+
+            if (audioResult) {
+              const audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
+              setCurrentAudioBase64(audioData);
+
+              // Cache the audio
+              if (typeof audioResult === 'string') {
+                await audioCache.set(reflection.content, audioResult);
+
+                // Automatically save to database when audio is first generated
+                if (userId && !isDemoMode && currentHistoryId) {
+                  optimizeAudio(audioResult)
+                    .then(optimized => {
+                      historyService.saveEntryAudio(currentHistoryId, optimized).catch(err => {
+                        console.warn('[JournalApp] Failed to save optimized audio:', err);
+                      });
+                    })
+                    .catch(err => {
+                      console.warn('[JournalApp] Audio optimization failed, saving original:', err);
+                      if (audioResult) {
+                        historyService.saveEntryAudio(currentHistoryId, audioResult).catch(() => { });
+                      }
+                    });
+                }
+              }
+
+              // Audio is stored in IndexedDB, no need to store in history state
+              // This avoids localStorage quota issues
+
+              playAudio(audioData, 'main');
+            } else {
+              showToast('Could not generate audio. Please try again.', 'error');
+            }
           }
         } catch (error) {
           console.error('TTS generation error:', error);
@@ -1196,8 +1228,17 @@ const JournalApp: React.FC = () => {
         }
       }
 
-      // LAYER 2: Fetch audio from database on-demand (cross-device sync)
-      // Check Supabase BEFORE local cache since database is the source of truth
+      // Check local cache (IndexedDB) - fastest option if available
+      const cached = await audioCache.get(text);
+      if (cached) {
+        audioData = typeof cached === 'string' ? cached : [cached];
+        setIsGeneratingVoice(false);
+        setGeneratingAudioId(null);
+        playAudio(audioData, id);
+        return;
+      }
+
+      // Fetch audio from database on-demand (cross-device sync)
       // Only fetch if we have a valid entry ID and user is authenticated
       if (entryId && userId && !isDemoMode) {
         console.log(`[handleHistoryAudioPlayback] Fetching audio from database for entry ${entryId}...`);
@@ -1213,31 +1254,34 @@ const JournalApp: React.FC = () => {
         }
       }
 
-      // LAYER 1 & 3: Check IndexedDB cache or generate new audio
-      // generateSpeech now handles IndexedDB cache check automatically
+      // Generate new audio
       const needsChunking = text.length > 1500;
       const audioResult = await generateSpeech(text, {
-        useCache: true,
         chunked: needsChunking
       });
 
       if (audioResult) {
         audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
 
-        // Optimize and sync to database for cross-device access
-        if (userId && !isDemoMode && historyEntry?.id && typeof audioResult === 'string') {
-          optimizeAudio(audioResult)
-            .then(optimized => {
-              historyService.saveEntryAudio(historyEntry.id, optimized).catch(err => {
-                console.warn('[JournalApp] Failed to save optimized audio:', err);
+        // Cache locally
+        if (typeof audioResult === 'string') {
+          await audioCache.set(text, audioResult);
+
+          // Optimize and sync to database for cross-device access
+          if (userId && !isDemoMode && historyEntry?.id) {
+            optimizeAudio(audioResult)
+              .then(optimized => {
+                historyService.saveEntryAudio(historyEntry.id, optimized).catch(err => {
+                  console.warn('[JournalApp] Failed to save optimized audio:', err);
+                });
+              })
+              .catch(err => {
+                console.warn('[JournalApp] Audio optimization failed, saving original:', err);
+                if (audioResult) {
+                  historyService.saveEntryAudio(historyEntry.id, audioResult).catch(() => { });
+                }
               });
-            })
-            .catch(err => {
-              console.warn('[JournalApp] Audio optimization failed, saving original:', err);
-              if (audioResult) {
-                historyService.saveEntryAudio(historyEntry.id, audioResult).catch(() => { });
-              }
-            });
+          }
         }
 
         playAudio(audioData, id);
@@ -1282,16 +1326,10 @@ const JournalApp: React.FC = () => {
       setGeneratingAudioId(id);
       setIsGeneratingVoice(true);
       try {
-        // Generate with chunking for long texts
-        // IndexedDB cache is checked automatically by generateSpeech
-        const needsChunking = text.length > 1500;
-        const audioResult = await generateSpeech(text, {
-          useCache: true,
-          chunked: needsChunking
-        });
-
-        if (audioResult) {
-          const audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
+        // Check cache first
+        const cached = await audioCache.get(text);
+        if (cached) {
+          const audioData = typeof cached === 'string' ? cached : [cached];
           const updatedMessages = chatMessages.map((m, i) =>
             i === index ? { ...m, audioBase64: audioData } : m
           );
@@ -1299,7 +1337,33 @@ const JournalApp: React.FC = () => {
           updateHistoryWithChat(updatedMessages);
           playAudio(audioData, id);
         } else {
-          showToast('Could not generate audio. Please try again.', 'error');
+          // Generate with chunking for long texts
+          const needsChunking = text.length > 1500;
+          const audioResult = await generateSpeech(text, {
+            chunked: needsChunking
+          });
+
+          if (audioResult) {
+            const audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
+            const updatedMessages = chatMessages.map((m, i) =>
+              i === index ? { ...m, audioBase64: audioData } : m
+            );
+            setChatMessages(updatedMessages);
+            updateHistoryWithChat(updatedMessages);
+
+            // Cache the audio
+            if (typeof audioResult === 'string') {
+              await audioCache.set(text, audioResult);
+
+              // Automatically save to database when audio is first generated (for chat messages)
+              // Note: Chat audio is typically not saved per message, but if there's a history entry,
+              // we could save it. For now, we'll just cache it since chat messages aren't persisted individually.
+            }
+
+            playAudio(audioData, id);
+          } else {
+            showToast('Could not generate audio. Please try again.', 'error');
+          }
         }
       } catch (error) {
         console.error('TTS generation error:', error);
@@ -1332,13 +1396,14 @@ const JournalApp: React.FC = () => {
         setContextRevalidated(false);
       }
 
-      const { reflection: content, summary, topic, mood: detectedMood, entities } = await getJournalReflection(entry, selectedMood, history);
-      console.log(`[JournalApp] Received reflection with topic: "${topic}", mood: "${detectedMood}", entities:`, entities);
+      const { reflection: content, summary, topic, mood: detectedMood, entities, highlights } = await getJournalReflection(entry, selectedMood, history);
+      console.log(`[JournalApp] Received reflection with topic: "${topic}", mood: "${detectedMood}", entities:`, entities, 'highlights:', highlights);
       const newReflection = {
         content,
         summary,
         timestamp: new Date(),
-        topic
+        topic,
+        highlights // Include highlights in reflection state
       };
 
       const newId = crypto.randomUUID();
@@ -1355,9 +1420,10 @@ const JournalApp: React.FC = () => {
         topic: topic,
         timestamp: new Date().toISOString(),
         chatHistory: [],
-        entities: entities // Save extracted entities
+        entities: entities, // Save extracted entities
+        highlights: highlights // Save AI-detected highlights
       };
-      console.log(`[JournalApp] Created history entry with topic: "${topic}", entities:`, entities);
+      console.log(`[JournalApp] Created history entry with topic: "${topic}", entities:`, entities, 'highlights:', highlights);
 
       setHistory(prev => [newHistoryEntry, ...prev]);
 
@@ -1377,93 +1443,116 @@ const JournalApp: React.FC = () => {
         }, 100);
       }
 
-      // Auto-generate audio (and save to DB) whether auto-play is enabled or not
-      // This ensures audio is always generated and synced to cloud
-      setIsGeneratingVoice(true);
-      setGeneratingAudioId('main');
+      // Only auto-generate audio if auto-play is enabled
+      // If auto-play is disabled, audio will be generated on-demand when user clicks play
+      console.log(`[JournalApp] Auto-play enabled: ${autoPlayEnabled}, Preferences loaded: ${preferencesLoaded}`);
+      if (autoPlayEnabled) {
+        console.log('[JournalApp] Auto-generating audio because auto-play is enabled');
+        setIsGeneratingVoice(true);
+        setGeneratingAudioId('main');
 
-      // Always generate and save audio to database after "Get Reflection"
-      // This ensures both text and audio sync to cloud immediately
-      // Audio will play automatically only if auto-play is enabled
-      (async () => {
-        try {
-          // Generate audio with automatic cache handling
-          // IndexedDB cache is checked automatically by generateSpeech
-          const needsChunking = content.length > 1500;
-          const generated = await generateSpeech(content, {
-            useCache: true,
-            chunked: needsChunking
-          });
+        (async () => {
+          try {
+            // Check cache first
+            const cached = await audioCache.get(content);
+            let audioResult: string | null = null;
 
-          if (!generated) {
-            showToast('Could not generate audio automatically.', 'error');
-            setIsGeneratingVoice(false);
-            setGeneratingAudioId(null);
-            return;
-          }
+            if (cached) {
+              // Use cached audio
+              audioResult = typeof cached === 'string' ? cached : cached[0];
+              const audioData = typeof cached === 'string' ? [cached] : cached;
+              setCurrentAudioBase64(audioData);
 
-          const audioResult = typeof generated === 'string' ? generated : generated[0];
-          const audioData = Array.isArray(generated) ? generated : [generated];
-          setCurrentAudioBase64(audioData);
+              // Store cached audio with history entry
+              setHistory(prev => prev.map(h =>
+                h.id === newId ? { ...h, audioBase64: cached } : h
+              ));
+            } else {
+              // Generate new audio
+              const needsChunking = content.length > 1500;
+              const generated = await generateSpeech(content, {
+                chunked: needsChunking
+              });
 
-          // Update history entry with audio
-          setHistory(prev => prev.map(h =>
-            h.id === newId ? { ...h, audioBase64: audioResult || undefined } : h
-          ));
-
-          // Automatically save audio to database immediately after generation/cache retrieval
-          // Start sync immediately without waiting - fire and forget
-          // This ensures audio syncs to cloud right after TTS generation finishes, not after playback
-          if (userId && !isDemoMode && newId && audioResult && typeof audioResult === 'string') {
-            console.log(`[JournalApp] Starting immediate audio sync to database for entry ${newId}`);
-
-            // Start optimization and save immediately (don't await - fire and forget)
-            // Check existence in parallel, but start saving anyway
-            Promise.all([
-              historyService.checkEntryAudioExists(newId).catch(() => false),
-              optimizeAudio(audioResult).catch(() => null)
-            ]).then(([audioExists, optimized]) => {
-              if (audioExists) {
-                console.log(`[JournalApp] Audio already exists in database for entry ${newId}`);
+              if (!generated) {
+                showToast('Could not generate audio automatically.', 'error');
+                setIsGeneratingVoice(false);
+                setGeneratingAudioId(null);
                 return;
               }
 
-              // Save optimized version if available, otherwise save original
-              const audioToSave = optimized || audioResult;
-              historyService.saveEntryAudio(newId, audioToSave)
-                    .then(() => {
-                      console.log(`[JournalApp] ✅ Audio saved to database for entry ${newId}`);
-                    })
-                    .catch(err => {
-                  console.warn('[JournalApp] Failed to save audio to database:', err);
-                    });
-            }).catch(err => {
-              console.warn('[JournalApp] Error during audio sync setup, trying direct save:', err);
-              // Fallback: try saving original directly
-                  historyService.saveEntryAudio(newId, audioResult)
-                    .then(() => {
-                  console.log(`[JournalApp] ✅ Audio saved to database (fallback) for entry ${newId}`);
-                    })
-                    .catch(() => { });
-                });
+              audioResult = typeof generated === 'string' ? generated : generated[0];
+              const audioData = Array.isArray(generated) ? generated : [generated];
+              setCurrentAudioBase64(audioData);
 
-            // Note: We don't await - this runs in background so audio can play immediately
-          }
+              // Update history entry with audio
+              setHistory(prev => prev.map(h =>
+                h.id === newId ? { ...h, audioBase64: audioResult || undefined } : h
+              ));
 
-          // Play audio only if auto-play is enabled
-          if (autoPlayEnabled && audioResult) {
-            // Use the audio data we already prepared
-            const audioDataToPlay = Array.isArray(audioData) ? audioData : [audioResult];
-            playAudio(audioDataToPlay, 'main');
-          }
-        } catch (error) {
-          console.error('Auto TTS generation error:', error);
-          showToast('Error generating speech automatically.', 'error');
-        } finally {
+              // Cache the audio in IndexedDB
+              if (typeof generated === 'string') {
+                await audioCache.set(content, generated);
+              }
+            }
+
+            // Automatically save audio to database immediately after generation/cache retrieval
+            // Start sync immediately without waiting - fire and forget
+            // This ensures audio syncs to cloud right after TTS generation finishes, not after playback
+            if (userId && !isDemoMode && newId && audioResult && typeof audioResult === 'string') {
+              console.log(`[JournalApp] Starting immediate audio sync to database for entry ${newId}`);
+
+              // Start optimization and save immediately (don't await - fire and forget)
+              // Check existence in parallel, but start saving anyway
+              Promise.all([
+                historyService.checkEntryAudioExists(newId).catch(() => false),
+                optimizeAudio(audioResult).catch(() => null)
+              ]).then(([audioExists, optimized]) => {
+                if (audioExists) {
+                  console.log(`[JournalApp] Audio already exists in database for entry ${newId}`);
+                  return;
+                }
+
+                // Save optimized version if available, otherwise save original
+                const audioToSave = optimized || audioResult;
+                historyService.saveEntryAudio(newId, audioToSave)
+                      .then(() => {
+                        console.log(`[JournalApp] ✅ Audio saved to database for entry ${newId}`);
+                      })
+                      .catch(err => {
+                    console.warn('[JournalApp] Failed to save audio to database:', err);
+                      });
+              }).catch(err => {
+                console.warn('[JournalApp] Error during audio sync setup, trying direct save:', err);
+                // Fallback: try saving original directly
+                    historyService.saveEntryAudio(newId, audioResult)
+                      .then(() => {
+                    console.log(`[JournalApp] ✅ Audio saved to database (fallback) for entry ${newId}`);
+                      })
+                      .catch(() => { });
+                  });
+
+              // Note: We don't await - this runs in background so audio can play immediately
+            }
+
+            // Play audio automatically (since auto-play is enabled)
+            if (audioResult) {
+              const audioDataToPlay = typeof audioResult === 'string'
+                ? [audioResult]
+                : (cached && Array.isArray(cached) ? cached : [audioResult]);
+              playAudio(audioDataToPlay, 'main');
+            }
+          } catch (error) {
+            console.error('Auto TTS generation error:', error);
+            showToast('Error generating speech automatically.', 'error');
+          } finally {
           setIsGeneratingVoice(false);
           setGeneratingAudioId(null);
         }
       })();
+      } else {
+        console.log('[JournalApp] Skipping audio generation - auto-play is disabled');
+      }
 
       setTimeout(() => {
         window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
@@ -1535,40 +1624,62 @@ const JournalApp: React.FC = () => {
       setChatMessages(updatedMessagesWithModel);
       updateHistoryWithChat(updatedMessagesWithModel);
 
-      setIsGeneratingVoice(true);
-      try {
-        // Generate with chunking
-        // IndexedDB cache is checked automatically by generateSpeech
-        const needsChunking = modelText.length > 1500;
-        const audioResult = await generateSpeech(modelText, {
-          useCache: true,
-          chunked: needsChunking
-        });
+      // Only auto-generate audio for chat messages if auto-play is enabled
+      if (autoPlayEnabled) {
+        setIsGeneratingVoice(true);
+        try {
+          // Check cache first
+          const cached = await audioCache.get(modelText);
+          if (cached) {
+            const audioData = typeof cached === 'string' ? cached : [cached];
+            setChatMessages(prev => {
+              const next = [...prev];
+              const lastIdx = next.length - 1;
+              if (next[lastIdx] && next[lastIdx].role === 'model') {
+                next[lastIdx] = { ...next[lastIdx], audioBase64: audioData };
+                updateHistoryWithChat(next);
+              }
+              return next;
+            });
 
-        if (audioResult) {
-          const audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
-          setChatMessages(prev => {
-            const next = [...prev];
-            const lastIdx = next.length - 1;
-            if (next[lastIdx] && next[lastIdx].role === 'model') {
-              next[lastIdx] = { ...next[lastIdx], audioBase64: audioData };
-              updateHistoryWithChat(next);
-            }
-            return next;
-          });
-
-          const id = `chat-${updatedMessagesWithUser.length}`;
-          if (autoPlayEnabled) {
+            const id = `chat-${updatedMessagesWithUser.length}`;
             playAudio(audioData, id);
+          } else {
+            // Generate with chunking
+            const needsChunking = modelText.length > 1500;
+            const audioResult = await generateSpeech(modelText, {
+              chunked: needsChunking
+            });
+
+            if (audioResult) {
+              const audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
+              setChatMessages(prev => {
+                const next = [...prev];
+                const lastIdx = next.length - 1;
+                if (next[lastIdx] && next[lastIdx].role === 'model') {
+                  next[lastIdx] = { ...next[lastIdx], audioBase64: audioData };
+                  updateHistoryWithChat(next);
+                }
+                return next;
+              });
+
+              // Cache the audio
+              if (typeof audioResult === 'string') {
+                await audioCache.set(modelText, audioResult);
+              }
+
+              const id = `chat-${updatedMessagesWithUser.length}`;
+              playAudio(audioData, id);
+            } else {
+              showToast('Could not generate audio automatically.', 'error');
+            }
           }
-        } else {
-          showToast('Could not generate audio automatically.', 'error');
+        } catch (error) {
+          console.error('Auto TTS generation error:', error);
+          showToast('Error generating speech automatically.', 'error');
+        } finally {
+          setIsGeneratingVoice(false);
         }
-      } catch (error) {
-        console.error('Auto TTS generation error:', error);
-        showToast('Error generating speech automatically.', 'error');
-      } finally {
-        setIsGeneratingVoice(false);
       }
     } catch (err: any) {
       console.error(err);
@@ -1684,6 +1795,14 @@ const JournalApp: React.FC = () => {
       // Authenticated: clear from Supabase
       try {
         await historyService.deleteAllEntries();
+        
+        // IMPORTANT: Also clear localStorage to prevent migration logic from re-importing old data
+        // The migration logic (lines 331-338) checks if DB is empty and localStorage has data,
+        // and automatically migrates localStorage → DB. This would undo the clear!
+        localStorage.removeItem(LEGACY_HISTORY_KEY); // Clear legacy key
+        localStorage.removeItem(`serenity_journal_history_${userId}`); // Clear user-specific key
+        localStorage.removeItem(currentHistoryKey); // Clear current key (should be same as above)
+        console.log('[JournalApp] Cleared database and localStorage to prevent migration re-import');
       } catch (error) {
         console.error('Failed to clear history from Supabase:', error);
         showToast('Failed to clear history', 'error');
@@ -1793,6 +1912,14 @@ const JournalApp: React.FC = () => {
                 Syncing
               </span>
             )}
+            {/* DEBUG: Show auto-play status */}
+            <span className={`flex items-center gap-1.5 text-[9px] md:text-[10px] px-2 py-0.5 md:py-1 rounded-full uppercase tracking-widest font-bold border ${
+              autoPlayEnabled 
+                ? 'text-emerald-600 bg-emerald-50 border-emerald-100' 
+                : 'text-stone-400 bg-stone-50 border-stone-200'
+            }`}>
+              Auto-play: {autoPlayEnabled ? 'ON' : 'OFF'}
+            </span>
           </div>
 
           <div className="flex items-center gap-2 md:gap-3">
@@ -2014,7 +2141,12 @@ const JournalApp: React.FC = () => {
           <button className={`transition-colors ${viewMode === ViewMode.HISTORY ? 'text-emerald-700 font-bold' : 'hover:text-stone-600'}`} onClick={() => setViewMode(ViewMode.HISTORY)}>History</button>
           <button
             className="hover:text-stone-600 transition-colors flex items-center gap-1"
-            onClick={() => setAutoPlayEnabled(!autoPlayEnabled)}
+            onClick={() => {
+              const newValue = !autoPlayEnabled;
+              console.log(`[JournalApp] Toggling auto-play from ${autoPlayEnabled} to ${newValue}`);
+              setAutoPlayEnabled(newValue);
+              showToast(`Auto-play ${newValue ? 'enabled' : 'disabled'}`, 'success');
+            }}
             title={autoPlayEnabled ? 'Disable auto-play' : 'Enable auto-play'}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 ${autoPlayEnabled ? 'text-emerald-600' : 'text-stone-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">

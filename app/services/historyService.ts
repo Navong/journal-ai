@@ -14,6 +14,7 @@ interface PrismaJournalEntry {
   mood?: string | null;
   audioData?: string | null; // Compressed audio (base64)
   entities?: any; // JSON field for extracted entities
+  highlights?: any; // JSON field for AI-detected highlights
   createdAt: Date | string;
   updatedAt: Date | string;
 }
@@ -37,6 +38,7 @@ function toHistoryEntry(dbEntry: PrismaJournalEntry): HistoryEntry {
     chatHistory: [], // Initialize empty - chat history is not persisted to DB
     audioBase64: dbEntry.audioData || undefined, // Load audio from database
     entities: dbEntry.entities as any || undefined, // Parse entities from JSON
+    highlights: dbEntry.highlights as any || undefined, // Parse highlights from JSON
   };
 }
 
@@ -58,6 +60,8 @@ function fromHistoryEntry(entry: HistoryEntry, includeAudio = false) {
     created_at: entry.timestamp,
     // Include entities if available (stored as JSON in database)
     entities: entry.entities || null,
+    // Include highlights if available (stored as JSON in database)
+    highlights: entry.highlights || null,
   };
 
   // Only include audio_data if:
