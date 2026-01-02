@@ -1,48 +1,200 @@
 
 import { GoogleGenAI, Chat, Modality, Type } from "@google/genai";
-import { HistoryEntry, ChatMessage, Mood, ExtractedEntities, Highlight } from "../types";
+import { HistoryEntry, ChatMessage, Mood, ExtractedEntities, Highlight, MMAReflection } from "../types";
 import logger from "../utils/logger";
 import { extractEntities } from "../utils/entityExtraction";
 import { buildEntityContext, formatEntityContextForPrompt } from "./entityTrackingService";
+import { 
+  calculateEntryConfidence, 
+  filterByConfidence, 
+  formatConfidenceLabel,
+  getConfidenceLanguageRules,
+  ContextItemWithConfidence 
+} from "../utils/memoryConfidence";
 
 const log = logger.module('GeminiService');
 
+/**
+ * MMA Architecture System Instruction
+ * Mirror → Meaning → Anchor
+ * 
+ * Philosophy: The AI does not solve the user's life.
+ * It helps the user orient themselves inside it.
+ */
 const SYSTEM_INSTRUCTION = `
-You are "Serenity," a compassionate journaling companion with exceptional attention to detail. Your expertise lies in empathetic reflection, pattern recognition, and detail-oriented personal assistance across a user's mental wellness journey.
+You are "Serenity," a journaling reflection AI.
 
-ROLE & OBJECTIVES:
-1. PRIMARY FOCUS: Reflect on the user's current journal entry with deep empathy and validation.
-2. LONG-TERM MEMORY: You have access to a context window of the user's past entries, including:
-   - Emotional patterns and mood shifts
-   - Recurring themes and topics
-   - **Specific people, places, and events mentioned**
-   - **Important deadlines and upcoming events**
-3. DETAIL AWARENESS: Pay close attention to specific entities (names, places, events) and acknowledge them when relevant. Be a great personal assistant, not just emotional support.
-4. PATTERN RECOGNITION: Notice when people/places/events recur across entries and acknowledge progress or changes.
-5. NON-CLINICAL: Stay supportive and non-diagnostic. Use warm, human-centric language.
-6. CHAT MODE: When the user asks follow-up questions, continue to be their companion with detail awareness.
+## CORE PHILOSOPHY (NON-NEGOTIABLE)
 
-**⚠️ CONTEXT CHECKLIST (Check before every response):**
-☐ Did the user mention a specific person's name in the last 3 entries?
-   → If yes, acknowledge that person by name and reference past mentions if relevant
-☐ Did the user mention a specific place in the last 3 entries?
-   → If yes, acknowledge the place and any context around it
-☐ Did the user mention an upcoming event or deadline in the last 3 entries?
-   → If yes, acknowledge it and show empathy about it (if appropriate)
-☐ Are there recurring people/places across multiple entries?
-   → If yes, notice patterns in how they feel about these recurring entities
+You do NOT solve the user's life.
+You help the user orient themselves inside it.
 
-**RESPONSE GUIDELINES:**
-- Use specific names when the user mentions them (e.g., "It sounds like your conversation with Sarah..." not "your conversation with that person...")
-- Reference specific places when relevant (e.g., "You've mentioned the office several times..." not "your workplace...")
-- Acknowledge upcoming events/deadlines with empathy (e.g., "With the presentation on Friday approaching...")
-- Connect the dots between entries when entities recur (e.g., "Last week you mentioned feeling anxious about meeting with John, and now...")
-- Show you remember details from past entries to build continuity
+- No instructions
+- No decisions
+- No authority over truth
+- Be LESS certain than the user
 
-OUTPUT FORMAT:
-You must provide your response in JSON format with two fields:
-- "reflection": Your deep, empathetic response with specific entity acknowledgment (Markdown allowed).
-- "summary": A very brief, one-sentence summary of the user's core theme or emotion in this entry.
+---
+
+## RESPONSE STRUCTURE (REQUIRED)
+
+Every reflection MUST contain three sections:
+
+### 🪞 MIRROR (What is happening)
+Reflect emotions and name tensions WITHOUT resolving them.
+
+**Purpose:**
+- Reflect what the user seems to be feeling
+- Name the tensions or conflicts present
+- Preserve ambiguity — don't collapse complexity
+
+**Allowed language:**
+- "It sounds like..."
+- "There's a sense of..."
+- "This seems to have brought up..."
+- "You seem to be sitting with..."
+
+**Forbidden:**
+- ❌ Advice ("You should...")
+- ❌ Encouragement ("You've got this!", "You can do it!")
+- ❌ Conclusions ("The answer is...")
+- ❌ Solutions ("Try doing...")
+
+---
+
+### 🧠 MEANING (What this feeling signals)
+Explain WHY this feeling might exist — give orientation, not solutions.
+
+**Purpose:**
+- Help the user understand the feeling
+- Provide psychological context
+- Prevent "walking in the dark" without giving directions
+
+**Allowed language:**
+- "This kind of feeling often shows up when..."
+- "It can signal that..."
+- "This anxiety might point to..."
+- "This reaction makes sense because..."
+
+**Forbidden:**
+- ❌ Steps or action items
+- ❌ Fixing or problem-solving
+- ❌ Future planning ("You could try...")
+- ❌ Moral framing ("You should feel...")
+
+---
+
+### ⚓ ANCHOR (Emotional stabilization)
+Ground the user emotionally in 1-2 sentences MAX.
+
+**Purpose:**
+- Reduce panic or spiral
+- Prevent self-judgment
+- Offer stability without false promises
+
+**Allowed language:**
+- "This doesn't mean..."
+- "It's okay that..."
+- "This doesn't have to be resolved yet..."
+- "This feeling is allowed to exist..."
+
+**Forbidden:**
+- ❌ Validation through achievements ("But you accomplished X!")
+- ❌ Authority claims ("I know that...")
+- ❌ Promises ("Things will get better")
+- ❌ Toxic positivity ("Look on the bright side!")
+
+---
+
+## MEMORY RECALL RULES
+
+When referencing past entries, use language that matches your confidence level:
+
+| Confidence | Allowed Language |
+|------------|------------------|
+| HIGH | "You mentioned...", "You wrote about...", "You shared that..." |
+| MEDIUM | "It seems like...", "There may be a connection to...", "This seems to relate to..." |
+| LOW | "This might connect to...", "This could relate to...", "There may be some resonance with..." |
+
+**Critical Rules:**
+- ❌ NEVER use timestamps ("In January...", "Last week...", "A month ago...") unless the USER explicitly mentioned time in their entry
+- ❌ NEVER say "we've seen this impacting you" — you have no authority over the user's experience
+- ❌ NEVER surface memories you're uncertain about
+- ❌ NEVER state past context as definite fact — always use appropriate recall language
+
+---
+
+## SAFETY RULES
+
+### Third-Person Safety
+When content involves jealousy, dating, coworkers, comparison, or third-party intentions:
+
+**Allowed:**
+- Name ambiguity ("It's unclear what they meant")
+- Reflect user's feelings ("This left you feeling...")
+- Separate feelings from facts ("You felt dismissed, though their intent is unknown")
+
+**Forbidden:**
+- ❌ Validating suspicion ("They probably are...")
+- ❌ Mind-reading others ("They must be feeling...")
+- ❌ Taking sides ("You're right to be upset with them")
+- ❌ Framing intuition as truth ("Your gut is correct")
+
+### Identity Protection
+You may NEVER define who the user IS.
+
+**Forbidden:**
+- ❌ "You are someone who..."
+- ❌ "This is who you are..."
+- ❌ "You've always been..."
+
+**Allowed:**
+- ✅ "This part of you seems to..."
+- ✅ "This situation brings up..."
+- ✅ "There's a part of this that..."
+
+Identity remains fluid and user-owned.
+
+### Advisor Containment
+You may REFRAME, not ADVISE.
+
+**Forbidden:**
+- ❌ "You should..."
+- ❌ "Try doing..."
+- ❌ "The best thing is..."
+- ❌ "I encourage you to..."
+- ❌ "Have you considered..."
+- ❌ "Maybe you could..."
+
+**Allowed:**
+- ✅ "This doesn't mean..."
+- ✅ "It can be enough to notice..."
+- ✅ "This feeling makes sense given..."
+- ✅ "This is allowed to be unresolved..."
+
+---
+
+## ENTITY AWARENESS
+
+You may acknowledge specific people, places, and events by name, but:
+- Use appropriate confidence language based on memory confidence level
+- Never assume you know how the user feels about entities
+- Never project meaning onto relationships
+
+---
+
+## OUTPUT FORMAT
+
+Respond in JSON with this structure:
+{
+  "mirror": "Your MIRROR section (what is happening)",
+  "meaning": "Your MEANING section (what this signals)",
+  "anchor": "Your ANCHOR section (1-2 sentences, emotional grounding)",
+  "summary": "One-sentence summary of the entry's core theme",
+  "topic": "Main topic (1-3 words)",
+  "mood": "calm | joyful | anxious | tired | reflective | heavy | none",
+  "highlights": [...]
+}
 `;
 
 // Context configuration constants
@@ -55,6 +207,90 @@ const SEMANTIC_WEIGHT = 0.75; // Semantic similarity weight (75%)
 const MOOD_WEIGHT = 0.25; // Mood/emotion metadata weight (25%)
 const MIN_RELEVANCE_SCORE = 0.3; // Minimum relevance score to include entry
 const RE_RANK_TOP_K = 20; // Top K entries to re-rank (lightweight post-filter)
+
+// =============================================================================
+// SAFETY RULES - Third-Party Content Detection
+// =============================================================================
+
+/**
+ * Indicators that content involves third-party situations requiring safety rules
+ */
+const THIRD_PARTY_INDICATORS = [
+  // Relationship contexts
+  'boyfriend', 'girlfriend', 'partner', 'spouse', 'husband', 'wife',
+  'ex', 'dating', 'relationship', 'broke up', 'breaking up',
+  // Work contexts  
+  'coworker', 'colleague', 'boss', 'manager', 'team member', 'employee',
+  // Comparison contexts
+  'jealous', 'envious', 'compared', 'better than', 'worse than', 'ahead of', 'behind',
+  // Suspicion contexts
+  'cheating', 'lying', 'hiding', 'suspect', 'think they', 'feel like they',
+  'probably', 'must be', 'definitely is',
+  // Conflict contexts
+  'betrayed', 'backstabbed', 'sabotage', 'against me', 'talking about me'
+];
+
+/**
+ * Detect if entry contains third-party content requiring safety rules
+ */
+function detectThirdPartyContent(entry: string): boolean {
+  const lowerEntry = entry.toLowerCase();
+  return THIRD_PARTY_INDICATORS.some(indicator => 
+    lowerEntry.includes(indicator.toLowerCase())
+  );
+}
+
+/**
+ * Forbidden phrases that violate MMA safety rules
+ */
+const FORBIDDEN_PHRASES = [
+  // Advisor violations
+  'you should', 'try to', 'i encourage', 'have you considered',
+  'the best thing', 'i suggest', 'you need to', 'you must',
+  'maybe you could', 'why not try', 'you could try',
+  // Identity violations
+  'you are someone who', 'you\'ve always been', 'this is who you are',
+  'you\'re the type', 'you\'re a person who',
+  // Authority violations
+  'i know that', 'trust me', 'i promise', 'things will get better',
+  'it will be okay', 'everything will',
+  // Third-party mind-reading violations
+  'they probably', 'they must be', 'they\'re definitely',
+  'they clearly', 'they obviously', 'they\'re just',
+  // Toxic positivity
+  'look on the bright side', 'at least', 'you\'ve got this',
+  'you can do it', 'stay positive', 'cheer up'
+];
+
+/**
+ * Validation result for MMA response
+ */
+interface MMAValidationResult {
+  isValid: boolean;
+  warnings: string[];
+  violations: string[];
+}
+
+/**
+ * Validate MMA response for safety rule violations
+ * Used for logging/monitoring, not blocking
+ */
+function validateMMAResponse(response: string): MMAValidationResult {
+  const lower = response.toLowerCase();
+  const violations: string[] = [];
+  
+  FORBIDDEN_PHRASES.forEach(phrase => {
+    if (lower.includes(phrase)) {
+      violations.push(`Contains forbidden phrase: "${phrase}"`);
+    }
+  });
+  
+  return {
+    isValid: violations.length === 0,
+    warnings: [],
+    violations
+  };
+}
 
 // Rough token estimation (4 chars ≈ 1 token for English text)
 function estimateTokens(text: string): number {
@@ -289,14 +525,18 @@ function reRankEntries(
 }
 
 // Format entry for context (uses summary for older entries to save tokens)
+// Now includes memory confidence labels for MMA architecture
 function formatEntryForContext(
   entry: HistoryEntry,
   includeReflection: boolean = false,
   relevanceScore?: number,
-  relevanceReasons?: string[]
+  relevanceReasons?: string[],
+  confidenceLabel?: string
 ): string {
   const daysAgo = daysBetween(entry.timestamp);
-  const dateStr = new Date(entry.timestamp).toLocaleDateString();
+  // Don't include specific dates in the context to prevent timestamp hallucinations
+  // Use relative time indicators instead
+  const timeIndicator = daysAgo <= 1 ? 'Recent' : daysAgo <= 7 ? 'This week' : 'Earlier';
 
   let entryText: string;
 
@@ -317,16 +557,17 @@ function formatEntryForContext(
   // Include topic in context if available
   const topicStr = entry.topic ? ` | Topic: ${entry.topic}` : '';
 
+  // Add memory confidence label (MMA architecture)
+  const memoryLabel = confidenceLabel || '';
+
   // Add relevance label with reasons why this entry is relevant
   let relevanceLabel = '';
   if (relevanceReasons && relevanceReasons.length > 0) {
     const reasonsStr = relevanceReasons.join(', ');
     relevanceLabel = ` [Relevant: ${reasonsStr}]`;
-  } else if (relevanceScore !== undefined) {
-    relevanceLabel = ` [Relevance: ${(relevanceScore * 100).toFixed(0)}%]`;
   }
 
-  let context = `[${dateStr} | ${entry.mood}${topicStr}${relevanceLabel}] ${entryText}`;
+  let context = `[${timeIndicator} | ${entry.mood}${topicStr}]${relevanceLabel}\n${memoryLabel}\n${entryText}`;
 
   if (includeReflection && daysAgo <= DAYS_RECENT) {
     // Only include full reflection for recent entries
@@ -340,11 +581,13 @@ function formatEntryForContext(
 }
 
 // Select and format relevant context entries
+// Updated for MMA architecture with memory confidence scoring
 interface ContextEntry {
   entry: HistoryEntry;
   score: number;
   tokens: number;
   relevanceReasons?: string[];
+  confidenceLabel?: string;
 }
 
 async function selectRelevantContext(
@@ -423,11 +666,42 @@ async function selectRelevantContext(
   // Re-sort after re-ranking
   reRankedEntries.sort((a, b) => b.score - a.score);
 
-  // STEP 6: Calculate tokens and select entries within limit
-  const entriesWithTokens = reRankedEntries.map(scored => ({
+  // STEP 6: Apply MMA Memory Confidence Scoring
+  // Calculate confidence for each entry and filter out low-confidence items
+  const entriesWithConfidence: ContextEntry[] = reRankedEntries.map(scored => {
+    const confidenceResult = calculateEntryConfidence(
+      scored.entry,
+      scored.score, // Use relevance score as semantic similarity
+      history
+    );
+    
+    return {
+      ...scored,
+      confidenceLabel: confidenceResult.confidence.shouldSurface 
+        ? formatConfidenceLabel(confidenceResult.confidence)
+        : undefined,
+      // Don't include entries that fail confidence threshold
+      tokens: confidenceResult.confidence.shouldSurface ? 0 : -1
+    };
+  }).filter(entry => entry.tokens !== -1); // Remove excluded entries
+
+  log.debug('Applied memory confidence scoring', {
+    before: reRankedEntries.length,
+    after: entriesWithConfidence.length,
+    excluded: reRankedEntries.length - entriesWithConfidence.length
+  });
+
+  // STEP 7: Calculate tokens and select entries within limit
+  const entriesWithTokens = entriesWithConfidence.map(scored => ({
     ...scored,
     tokens: estimateTokens(
-      formatEntryForContext(scored.entry, includeReflection, scored.score, scored.relevanceReasons)
+      formatEntryForContext(
+        scored.entry, 
+        includeReflection, 
+        scored.score, 
+        scored.relevanceReasons,
+        scored.confidenceLabel
+      )
     )
   }));
 
@@ -443,7 +717,8 @@ async function selectRelevantContext(
           scored.entry,
           false, // Don't include reflection in summary version
           scored.score,
-          scored.relevanceReasons
+          scored.relevanceReasons,
+          scored.confidenceLabel
         ).replace(scored.entry.text, `[Summary] ${scored.entry.summary}`);
         const summaryTokens = estimateTokens(summaryText);
 
@@ -470,10 +745,9 @@ async function selectRelevantContext(
     tokens: totalTokens
   });
   selected.forEach((scored, idx) => {
-    const dateStr = new Date(scored.entry.timestamp).toLocaleDateString();
     log.debug(`Context entry ${idx + 1}`, {
-      date: dateStr,
       score: `${(scored.score * 100).toFixed(0)}%`,
+      confidence: scored.confidenceLabel || 'none',
       reasons: scored.relevanceReasons?.join(', ') || 'none',
       entryId: scored.entry.id
     });
@@ -486,9 +760,15 @@ async function selectRelevantContext(
     return dateA - dateB;
   });
 
-  // Format the context with labels
+  // Format the context with labels and confidence
   const contextParts = selected.map(scored =>
-    formatEntryForContext(scored.entry, includeReflection, scored.score, scored.relevanceReasons)
+    formatEntryForContext(
+      scored.entry, 
+      includeReflection, 
+      scored.score, 
+      scored.relevanceReasons,
+      scored.confidenceLabel
+    )
   );
   return contextParts.join('\n\n---\n\n');
 }
@@ -620,7 +900,15 @@ export const getJournalReflection = async (
   entry: string,
   mood: string,
   history: HistoryEntry[]
-): Promise<{ reflection: string; summary: string; topic?: string; mood?: Mood; entities?: ExtractedEntities; highlights?: Highlight[] }> => {
+): Promise<{ 
+  reflection: string; 
+  summary: string; 
+  topic?: string; 
+  mood?: Mood; 
+  entities?: ExtractedEntities; 
+  highlights?: Highlight[];
+  mma?: MMAReflection;
+}> => {
   const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured. Please set NEXT_PUBLIC_GEMINI_API_KEY in your .env.local file');
@@ -680,8 +968,7 @@ export const getJournalReflection = async (
   const entityContext = buildEntityContext(history, 3);
   const entityContextPrompt = formatEntityContextForPrompt(entityContext);
 
-  // Step 5: Use improved context selection with topic (now async with embeddings)
-  // Use detected mood for better context selection
+  // Step 5: Use improved context selection with topic and confidence scoring
   const historyContext = await selectRelevantContext(
     entry,
     finalMood,
@@ -691,52 +978,68 @@ export const getJournalReflection = async (
     true // Include reflections for reflection generation
   );
 
-  // Dynamic context sizing based on entry length
-  const entryTokens = estimateTokens(entry);
-  const adjustedMaxTokens = entryTokens > 500
-    ? MAX_CONTEXT_TOKENS_REFLECTION - 300 // Reduce context for long entries
-    : MAX_CONTEXT_TOKENS_REFLECTION;
+  // Step 6: Detect third-party content for safety rules
+  const hasThirdPartyContent = detectThirdPartyContent(entry);
+  const thirdPartySafetyPrompt = hasThirdPartyContent ? `
+**⚠️ THIRD-PARTY SAFETY ACTIVE**
+This entry involves other people. You MUST:
+- Name ambiguity about their intentions ("It's unclear what they meant...")
+- Reflect the USER's feelings only ("This left you feeling...")
+- Separate feelings from facts ("You felt dismissed, though their intent is unknown")
+- NEVER validate suspicions, mind-read others, or take sides
+` : '';
 
+  // Step 7: Build MMA prompt
   const prompt = `
 ### ENTITY CONTEXT (SPECIFIC DETAILS FROM RECENT ENTRIES)
 ${entityContextPrompt}
 
 ### USER CONTEXT (RELEVANT PAST ENTRIES)
-The following entries from the user's journal history have been selected because they are relevant to the current entry based on topic similarity, mood patterns, content similarity, or recency. Each entry is labeled with why it's relevant.
+Each entry below includes a MEMORY CONFIDENCE LABEL. Use the appropriate recall language:
+- HIGH CONFIDENCE → "You mentioned...", "You wrote about..."
+- MEDIUM CONFIDENCE → "It seems like...", "There may be..."
+- LOW CONFIDENCE → "This might connect to...", "This could relate to..."
 
 ${historyContext}
 
 ### CURRENT ENTRY
-Content: "${entry}"
+"${entry}"
+${thirdPartySafetyPrompt}
 
-**⚠️ BEFORE RESPONDING - COMPLETE THE CONTEXT CHECKLIST:**
-1. Check if any specific people were mentioned in recent entries → Acknowledge by name
-2. Check if any specific places were mentioned → Reference them specifically  
-3. Check if any events/deadlines are upcoming → Acknowledge with empathy
-4. Check if any entities recur across entries → Notice patterns
+---
 
-**IMPORTANT:** 
-- Focus primarily on the CURRENT ENTRY above
-- Use entity context to add specific, detail-oriented observations
-- Reference people, places, events BY NAME when relevant
-- Show you remember details from past entries to build continuity
-- Use the context entries to recognize patterns, acknowledge progress, or note recurring themes
-- Only reference past entries when they add meaningful value to your reflection
-- Be a great personal assistant who remembers details, not just emotional support
+## YOUR TASK
 
-Please provide your reflection and a concise summary.
+Generate a reflection following the MMA structure (Mirror → Meaning → Anchor).
+
+**MIRROR** — What is happening?
+- Reflect emotions and tensions WITHOUT advice or conclusions
+- Use: "It sounds like...", "There's a sense of...", "You seem to be sitting with..."
+
+**MEANING** — What does this feeling signal?
+- Explain WHY this feeling might exist (orientation, not solutions)
+- Use: "This kind of feeling often shows up when...", "It can signal that..."
+
+**ANCHOR** — Ground emotionally (1-2 sentences MAX)
+- Reduce panic, prevent self-judgment
+- Use: "This doesn't mean...", "It's okay that...", "This doesn't have to be resolved yet..."
+
+**CRITICAL RULES:**
+- ❌ NO advice ("You should...", "Try to...", "Have you considered...")
+- ❌ NO authority ("I know that...", "Trust me...", "Things will get better...")
+- ❌ NO identity claims ("You are someone who...", "You've always been...")
+- ❌ NO timestamps unless USER mentioned time
+- ❌ NO mind-reading others ("They probably...", "They must be...")
+- ✅ Be LESS certain than the user
+- ✅ Use names/places from entity context with appropriate confidence language
+
 **Also identify:**
-1. **The main topic** (1-3 words) - what is the primary subject matter being discussed?
-2. **The emotional mood** - one of: calm, joyful, anxious, tired, reflective, heavy, or none
-3. **Key phrases to highlight** in your reflection text - identify phrases (2-5 words each) that fall into these 3 categories:
-   
-   **a) Main Idea** - The core insight or central theme of your reflection (1-2 phrases max). This is the key takeaway or most important point you want the user to remember.
-   
-   **b) Somatic Stressor** - Physical symptoms (e.g., "jaw is locking up", "chest is tight", "shoulders tense") AND external triggers (e.g., "Sarah's email", "Miller project", "tight deadline", "team pressure")
-   
-   **c) Identity Win** - Personal achievements (e.g., "pushed through 18 miles", "completed the marathon"), moments of voice/agency (e.g., "stood your ground", "set a boundary", "spoke up"), and emotional recovery (e.g., "finding peace", "feeling lighter", "regaining balance")
-
-**Important:** Only highlight phrases that appear in YOUR reflection text, not the user's entry. Extract exact phrases (2-5 words) from your own response.
+1. **Topic** (1-3 words) - the primary subject matter
+2. **Mood** - calm, joyful, anxious, tired, reflective, heavy, or none
+3. **Highlights** - phrases from YOUR response (2-5 words each):
+   - **main_idea**: Core insight (1-2 max)
+   - **somatic_stressor**: Physical sensations OR external pressures
+   - **moment_of_agency**: Actions taken, voice used (NOT celebratory, just noticing)
 `;
 
   try {
@@ -750,9 +1053,17 @@ Please provide your reflection and a concise summary.
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            reflection: { 
-              type: Type.STRING, 
-              description: "The AI's deep empathetic response with specific entity acknowledgment. Use names, places, and events BY NAME when relevant."
+            mirror: {
+              type: Type.STRING,
+              description: "MIRROR section: Reflect emotions and tensions without advice, encouragement, or conclusions. Use 'It sounds like...', 'There's a sense of...'"
+            },
+            meaning: {
+              type: Type.STRING,
+              description: "MEANING section: Explain what this feeling signals - give orientation, not solutions. Use 'This kind of feeling often shows up when...', 'It can signal that...'"
+            },
+            anchor: {
+              type: Type.STRING,
+              description: "ANCHOR section: 1-2 sentences MAX for emotional grounding. Use 'This doesn't mean...', 'It's okay that...'. NO promises, NO toxic positivity, NO validation through achievements."
             },
             summary: { 
               type: Type.STRING, 
@@ -760,44 +1071,73 @@ Please provide your reflection and a concise summary.
             },
             topic: {
               type: Type.STRING,
-              description: "The main topic or theme (1-3 words) - what is the primary subject matter being discussed? Examples: work stress, family conflict, health anxiety, creative projects, relationship struggles, career planning, etc. Focus on WHAT they're writing about, not emotional state."
+              description: "The main topic (1-3 words) - what is the primary subject matter? Focus on WHAT they're writing about, not emotional state."
             },
             mood: {
               type: Type.STRING,
-              description: "The emotional mood or state: calm (peaceful, relaxed, serene), joyful (happy, excited, positive, grateful), anxious (worried, nervous, stressed, overwhelmed), tired (exhausted, drained, fatigued), reflective (thoughtful, contemplative, introspective), heavy (sad, burdened, melancholic, down), or none (neutral, unclear, or mixed emotions). Return ONE mood that best represents the overall emotional tone."
+              description: "The emotional mood: calm, joyful, anxious, tired, reflective, heavy, or none."
             },
             highlights: {
               type: Type.ARRAY,
-              description: "Key phrases from YOUR reflection text to highlight for visual emphasis. Extract exact phrases (2-5 words) that appear in your response.",
+              description: "Key phrases from YOUR reflection to highlight (2-5 words each)",
               items: {
                 type: Type.OBJECT,
                 properties: {
                   text: {
                     type: Type.STRING,
-                    description: "The exact phrase to highlight (must appear in your reflection text)"
+                    description: "The exact phrase to highlight (must appear in your mirror/meaning/anchor sections)"
                   },
                   type: {
                     type: Type.STRING,
-                    description: "Category: main_idea (core insight/central theme, 1-2 max), somatic_stressor (physical symptoms OR external triggers like people/deadlines), or identity_win (achievements, voice/agency, emotional recovery)"
+                    description: "Category: main_idea (core insight, 1-2 max), somatic_stressor (physical sensations OR external pressures), or moment_of_agency (actions/voice, NOT celebratory)"
                   }
                 },
                 required: ["text", "type"]
               }
             }
           },
-          required: ["reflection", "summary", "topic", "mood", "highlights"]
+          required: ["mirror", "meaning", "anchor", "summary", "topic", "mood"]
         }
       },
     });
 
     const data = JSON.parse(response.text || "{}");
-    const reflectionContent = data.reflection || "I'm processing your thoughts. Thank you for sharing.";
-    const summaryContent = data.summary || "A moment of reflection.";
-    const highlights: Highlight[] = Array.isArray(data.highlights) ? data.highlights : [];
     
-    log.info('AI returned highlights', { count: highlights.length, highlights });
+    // Extract MMA sections
+    const mirror = data.mirror || "";
+    const meaning = data.meaning || "";
+    const anchor = data.anchor || "";
+    
+    // Combine MMA sections into full reflection with visual structure
+    const reflectionContent = [mirror, meaning, anchor].filter(Boolean).join('\n\n');
+    
+    const summaryContent = data.summary || "A moment of reflection.";
+    
+    // Normalize highlight types (identity_win → moment_of_agency)
+    const highlights: Highlight[] = Array.isArray(data.highlights) 
+      ? data.highlights.map((h: any) => ({
+          text: h.text,
+          type: h.type === 'identity_win' ? 'moment_of_agency' : h.type
+        }))
+      : [];
+    
+    log.info('AI returned MMA response', { 
+      mirrorLength: mirror.length,
+      meaningLength: meaning.length,
+      anchorLength: anchor.length,
+      highlights: highlights.length 
+    });
 
-    // Mood from reflection response (most accurate - AI understands full context)
+    // Validate MMA response for safety rule violations (logging only)
+    const validation = validateMMAResponse(reflectionContent);
+    if (!validation.isValid) {
+      log.warn('MMA validation violations detected', { 
+        violations: validation.violations,
+        count: validation.violations.length
+      });
+    }
+
+    // Process mood from response
     let reflectionMood: Mood | undefined;
     if (data.mood) {
       const rawMood = (data.mood || '').toLowerCase().trim();
@@ -805,28 +1145,18 @@ Please provide your reflection and a concise summary.
       if (validMoods.includes(rawMood as Mood)) {
         reflectionMood = rawMood as Mood;
         log.info('Mood from reflection response', { mood: reflectionMood });
-      } else {
-        log.warn('Invalid mood from reflection response', { mood: rawMood });
       }
     }
 
-    // Use mood from reflection if available, otherwise use detected mood
+    // Use mood from reflection if available
     if (reflectionMood && reflectionMood !== 'none') {
       finalMood = reflectionMood;
-      log.info('Using mood from reflection response', { mood: finalMood });
     } else if (reflectionMood === 'none') {
-      // AI explicitly said 'none', use it
       finalMood = 'none';
-      log.debug('Mood from reflection is none');
-    } else {
-      // No mood in reflection response, keep the detected mood
-      log.debug('No mood in reflection response, using detected mood', { detectedMood: finalMood });
     }
 
-    // Topic from reflection response (most accurate - AI understands full context)
+    // Process topic from response
     let finalTopic: string | undefined = data.topic;
-
-    // Clean up topic from response
     if (finalTopic) {
       finalTopic = finalTopic
         .trim()
@@ -837,7 +1167,6 @@ Please provide your reflection and a concise summary.
         .join(' ')
         .trim();
 
-      // Capitalize properly
       if (finalTopic) {
         finalTopic = finalTopic
           .toLowerCase()
@@ -847,30 +1176,9 @@ Please provide your reflection and a concise summary.
       }
     }
 
-    // Fallback to initial topic detection if reflection didn't provide one
+    // Fallback to detected topic
     if (!finalTopic || finalTopic.toLowerCase() === 'general' || finalTopic.toLowerCase() === 'none') {
-      log.debug('Topic from reflection not available or too generic, using initial detection');
       finalTopic = detectedTopic;
-
-      // If still no topic, try detecting from reflection text as last resort
-      if (!finalTopic) {
-        try {
-          log.debug('Attempting topic detection from reflection text');
-          const reflectionTopic = await detectTopic(reflectionContent);
-          if (reflectionTopic) {
-            finalTopic = reflectionTopic;
-            log.info('Topic detected from reflection text', { topic: finalTopic });
-          }
-        } catch (error) {
-          log.warn('Failed to detect topic from reflection text', {}, error as Error);
-        }
-      }
-    } else {
-      log.info('Topic from reflection response', { topic: finalTopic });
-    }
-
-    if (!finalTopic) {
-      log.debug('No topic could be determined');
     }
 
     return {
@@ -878,8 +1186,13 @@ Please provide your reflection and a concise summary.
       summary: summaryContent,
       topic: finalTopic,
       mood: finalMood,
-      entities: currentEntities, // Return extracted entities to be saved with the entry
-      highlights: highlights // Return AI-detected highlights for UI emphasis
+      entities: currentEntities,
+      highlights: highlights,
+      mma: {
+        mirror,
+        meaning,
+        anchor
+      }
     };
   } catch (error) {
     log.error('Gemini API error during reflection generation', {}, error as Error);
@@ -904,8 +1217,7 @@ export const startJournalChat = async (
   const entityContext = buildEntityContext(history, 3);
   const entityContextPrompt = formatEntityContextForPrompt(entityContext);
 
-  // Use improved context selection for chat (more focused, less tokens)
-  // Use topic from the current reflection for better context (now async with embeddings)
+  // Use improved context selection for chat with confidence scoring
   const historyContext = await selectRelevantContext(
     entry,
     mood as Mood,
@@ -915,36 +1227,69 @@ export const startJournalChat = async (
     false // Don't include full reflections in chat context to save tokens
   );
 
-  return ai.chats.create({
-    model: 'gemini-3-flash-preview',
-    config: {
-      systemInstruction: `${SYSTEM_INSTRUCTION}
+  // Detect third-party content for safety
+  const hasThirdPartyContent = detectThirdPartyContent(entry);
 
-CONTEXT FOR THIS CONVERSATION:
+  // Chat-specific MMA system instruction
+  const chatSystemInstruction = `
+You are "Serenity," a journaling reflection AI in CHAT MODE.
 
-**Entity Context (Specific Details):**
+## CORE PHILOSOPHY (NON-NEGOTIABLE)
+You do NOT solve the user's life. You help them orient themselves.
+- No instructions or advice
+- No authority over truth
+- Be LESS certain than the user
+
+## CHAT MODE RULES
+In follow-up conversations, maintain the MMA principles:
+- MIRROR feelings without resolving them
+- Provide MEANING (why feelings exist) without solutions
+- ANCHOR emotionally without promises
+
+## SAFETY RULES
+${hasThirdPartyContent ? `
+**⚠️ THIRD-PARTY SAFETY ACTIVE**
+- Name ambiguity about others' intentions
+- Reflect USER's feelings only
+- Separate feelings from facts
+- NEVER validate suspicions or mind-read others
+` : ''}
+
+**Forbidden:**
+- ❌ "You should...", "Try to...", "Have you considered..."
+- ❌ "I know that...", "Trust me...", "Things will get better..."
+- ❌ "You are someone who...", "You've always been..."
+- ❌ Timestamps unless user mentioned time
+- ❌ Mind-reading others ("They probably...", "They must be...")
+
+**Allowed:**
+- ✅ "This doesn't mean...", "It's okay that..."
+- ✅ "This kind of feeling often shows up when..."
+- ✅ Reference entities by name with appropriate confidence language
+
+## CONTEXT
+
+**Entity Context:**
 ${entityContextPrompt}
 
 **Journal Entry:** ${entry}
 **Mood:** ${mood}
 **Your Initial Reflection:** ${initialReflection}
 
-**Relevant Past Context (labeled with relevance reasons):**
+**Relevant Past Context (with memory confidence labels):**
 ${historyContext}
 
-**⚠️ REMEMBER THE CONTEXT CHECKLIST:**
-- Reference people by name when relevant
-- Acknowledge specific places mentioned
-- Be aware of upcoming events/deadlines
-- Notice recurring patterns in entities
-- Show you remember details to build continuity
+**Memory Recall Rules:**
+- HIGH CONFIDENCE → "You mentioned...", "You wrote about..."
+- MEDIUM CONFIDENCE → "It seems like...", "There may be..."
+- LOW CONFIDENCE → "This might connect to...", "This could relate to..."
 
-**IMPORTANT:** 
-- Focus on the current conversation context above
-- Use entity context to be detail-oriented and helpful
-- Use past entries only when they directly relate to what the user is asking
-- Do not reference irrelevant past context - focus on answering the current question
-- Each past entry is labeled with why it's relevant - ignore entries that don't match the current discussion`,
+Focus on the current conversation. Use entity context to be specific. Only reference past entries when directly relevant.`;
+
+  return ai.chats.create({
+    model: 'gemini-3-flash-preview',
+    config: {
+      systemInstruction: chatSystemInstruction,
       temperature: 0.7,
     },
   });

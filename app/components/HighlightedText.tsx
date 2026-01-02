@@ -12,9 +12,17 @@ interface HighlightedTextProps {
 
 /**
  * Highlights phrases in reflection text based on AI-detected categories
- * Uses 2 focused categories for clean visual narrative:
+ * Uses 3 focused categories for clean visual narrative:
+ * 
  * 1. Somatic Stressor - Physical symptoms + external triggers (red underline)
- * 2. Identity Win - Achievements + voice/agency + emotional recovery (gold highlight)
+ *    Examples: "jaw is tight", "deadline pressure", "chest feels heavy"
+ * 
+ * 2. Moment of Agency - Actions taken, voice used, NOT celebratory (gold highlight)
+ *    Examples: "set a boundary", "spoke up", "made the decision"
+ *    Note: This replaces the old "identity_win" - focus on noticing, not celebrating
+ * 
+ * 3. Main Idea - Core insight or central observation (purple emphasis)
+ *    Examples: "uncertainty is part of growth", "this feeling makes sense"
  * 
  * Also processes markdown syntax (bold, italic, etc.)
  */
@@ -28,15 +36,22 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highl
     );
   }
 
+  // Normalize highlight type (handle legacy 'identity_win' → 'moment_of_agency')
+  const normalizeType = (type: string): HighlightType => {
+    if (type === 'identity_win') return 'moment_of_agency';
+    return type as HighlightType;
+  };
+
   // Get style class for each highlight type
-  const getStyleForType = (type: HighlightType): string => {
-    switch (type) {
+  const getStyleForType = (type: HighlightType | 'identity_win'): string => {
+    const normalizedType = normalizeType(type);
+    switch (normalizedType) {
       case 'somatic_stressor':
         // Physical symptoms + external triggers - soft red glow with underline
         return 'underline decoration-red-400 decoration-2 underline-offset-2 text-red-900 font-medium bg-red-50/50 px-0.5 rounded';
       
-      case 'identity_win':
-        // Achievements + voice + recovery - bold with gold background
+      case 'moment_of_agency':
+        // Moments of action/voice - gold background (not celebratory, just noticing)
         return 'font-bold bg-amber-50 text-amber-900 px-1 py-0.5 rounded shadow-sm';
       
       case 'main_idea':
@@ -49,11 +64,12 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highl
   };
 
   // Format type label for tooltip
-  const formatTypeLabel = (type: HighlightType): string => {
-    switch (type) {
-      case 'somatic_stressor': return 'Somatic Stressor';
-      case 'identity_win': return 'Identity Win';
-      case 'main_idea': return 'Main Idea';
+  const formatTypeLabel = (type: HighlightType | 'identity_win'): string => {
+    const normalizedType = normalizeType(type);
+    switch (normalizedType) {
+      case 'somatic_stressor': return 'Stressor';
+      case 'moment_of_agency': return 'Agency';
+      case 'main_idea': return 'Key Insight';
       default: return 'Highlighted';
     }
   };
@@ -67,9 +83,10 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highl
   const highlightMap = new Map<string, { type: HighlightType; className: string }>();
   highlights.forEach(highlight => {
     if (highlight.text && highlight.text.trim()) {
-      const normalized = highlight.text.trim().toLowerCase();
-      highlightMap.set(normalized, {
-        type: highlight.type,
+      const normalizedText = highlight.text.trim().toLowerCase();
+      const normalizedType = normalizeType(highlight.type);
+      highlightMap.set(normalizedText, {
+        type: normalizedType,
         className: getStyleForType(highlight.type)
       });
     }
