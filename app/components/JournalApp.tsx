@@ -421,6 +421,44 @@ const JournalApp: React.FC = () => {
     }
   }, [userId, isDemoMode, session, authStatus]); // Re-run when user/demo/session/status changes
 
+  // Refetch history when switching to History view to ensure fresh data
+  useEffect(() => {
+    // Only refetch if we're switching to History view and component is mounted
+    if (viewMode === ViewMode.HISTORY && isMounted) {
+      if (!isDemoMode && userId) {
+        // Authenticated mode: fetch from backend
+        console.log('[JournalApp] History view opened, refetching history from backend...');
+        historyService.fetchHistory()
+          .then((loadedHistory) => {
+            console.log(`[JournalApp] ✅ Refetched ${loadedHistory?.length || 0} entries for History view`);
+            setHistory(loadedHistory || []);
+          })
+          .catch((error) => {
+            console.error('[JournalApp] Failed to refetch history for History view:', error);
+            // Don't clear existing history on error, just log it
+          });
+      } else if (isDemoMode) {
+        // Demo mode: reload from localStorage
+        console.log('[JournalApp] History view opened, reloading history from localStorage...');
+        const currentHistoryKey = getHistoryKey(userId, isDemoMode);
+        const savedHistory = localStorage.getItem(currentHistoryKey);
+        if (savedHistory) {
+          try {
+            const parsed = JSON.parse(savedHistory);
+            const cleanedHistory = parsed.map((entry: any) => {
+              const { audioBase64, ...rest } = entry;
+              return rest;
+            });
+            console.log(`[JournalApp] ✅ Reloaded ${cleanedHistory.length} entries for History view (demo)`);
+            setHistory(cleanedHistory);
+          } catch (e) {
+            console.error('[JournalApp] Error parsing demo history:', e);
+          }
+        }
+      }
+    }
+  }, [viewMode, userId, isDemoMode, isMounted]); // Re-run when viewMode changes to HISTORY
+
   // Automatic background audio sync - runs periodically
   useEffect(() => {
     // Don't run if user is not authenticated or in demo mode

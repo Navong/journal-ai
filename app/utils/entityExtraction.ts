@@ -105,7 +105,56 @@ Extract entities:`;
       }
     });
 
-    const data = JSON.parse(response.text || '{}');
+    // Clean and parse the response text
+    let responseText = response.text || '{}';
+    
+    // Remove markdown code blocks if present (some models wrap JSON in ```json ... ```)
+    responseText = responseText.trim();
+    if (responseText.startsWith('```')) {
+      // Remove opening ```json or ```
+      responseText = responseText.replace(/^```(?:json)?\s*/i, '');
+      // Remove closing ```
+      responseText = responseText.replace(/\s*```$/i, '');
+      responseText = responseText.trim();
+    }
+    
+    // Try to extract JSON from text if it's embedded in other text
+    // Look for JSON object pattern { ... }
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch && jsonMatch[0] !== responseText) {
+      log.debug('Extracted JSON from response text', { 
+        originalLength: responseText.length,
+        extractedLength: jsonMatch[0].length 
+      });
+      responseText = jsonMatch[0];
+    }
+    
+    // Validate response text before parsing
+    if (!responseText || responseText === '{}' || !responseText.trim().startsWith('{')) {
+      log.warn('Empty or invalid response from entity extraction API', { 
+        responseLength: responseText.length,
+        preview: responseText.substring(0, 100)
+      });
+      return { people: [], places: [], events: [], organizations: [] };
+    }
+    
+    let data: any;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      log.error('Failed to parse JSON response', { 
+        responseText: responseText.substring(0, 500), // Log first 500 chars for debugging
+        responseLength: responseText.length,
+        error: parseError instanceof Error ? parseError.message : String(parseError)
+      }, parseError as Error);
+      return { people: [], places: [], events: [], organizations: [] };
+    }
+    
+    // Validate data structure
+    if (!data || typeof data !== 'object') {
+      log.warn('Invalid data structure from entity extraction', { data });
+      return { people: [], places: [], events: [], organizations: [] };
+    }
     
     const entities: ExtractedEntities = {
       people: Array.isArray(data.people) ? data.people.filter((p: string) => p && p.trim()) : [],
