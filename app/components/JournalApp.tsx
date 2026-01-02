@@ -2067,6 +2067,7 @@ const JournalApp: React.FC = () => {
             <ReflectionCard
               reflection={reflection}
               isLoading={status === AppStatus.LOADING}
+              entities={currentHistoryId ? history.find(h => h.id === currentHistoryId)?.entities : undefined}
               onPlay={handleTogglePlayback}
               onPause={pauseCurrentAudio}
               onStop={stopCurrentAudio}
