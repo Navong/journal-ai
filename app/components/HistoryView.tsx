@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { HistoryEntry } from '../types';
 import ReactMarkdown from 'react-markdown';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
+import { EntityTags } from './EntityTags';
 
 interface HistoryViewProps {
   history: HistoryEntry[];
@@ -195,6 +196,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       {item.summary}
                     </p>
                   </div>
+                )}
+
+                {/* Entity Tags */}
+                {item.entities && (
+                  <EntityTags entities={item.entities} compact />
                 )}
 
                 {/* Journal Entry with Truncation */}
