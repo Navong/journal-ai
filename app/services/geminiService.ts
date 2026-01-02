@@ -728,11 +728,13 @@ Please provide your reflection and a concise summary.
 **Also identify:**
 1. **The main topic** (1-3 words) - what is the primary subject matter being discussed?
 2. **The emotional mood** - one of: calm, joyful, anxious, tired, reflective, heavy, or none
-3. **Key phrases to highlight** in your reflection text - identify phrases (2-5 words each) that fall into these 2 categories:
+3. **Key phrases to highlight** in your reflection text - identify phrases (2-5 words each) that fall into these 3 categories:
    
-   **a) Somatic Stressor** - Physical symptoms (e.g., "jaw is locking up", "chest is tight", "shoulders tense") AND external triggers (e.g., "Sarah's email", "Miller project", "tight deadline", "team pressure")
+   **a) Main Idea** - The core insight or central theme of your reflection (1-2 phrases max). This is the key takeaway or most important point you want the user to remember.
    
-   **b) Identity Win** - Personal achievements (e.g., "pushed through 18 miles", "completed the marathon"), moments of voice/agency (e.g., "stood your ground", "set a boundary", "spoke up"), and emotional recovery (e.g., "finding peace", "feeling lighter", "regaining balance")
+   **b) Somatic Stressor** - Physical symptoms (e.g., "jaw is locking up", "chest is tight", "shoulders tense") AND external triggers (e.g., "Sarah's email", "Miller project", "tight deadline", "team pressure")
+   
+   **c) Identity Win** - Personal achievements (e.g., "pushed through 18 miles", "completed the marathon"), moments of voice/agency (e.g., "stood your ground", "set a boundary", "spoke up"), and emotional recovery (e.g., "finding peace", "feeling lighter", "regaining balance")
 
 **Important:** Only highlight phrases that appear in YOUR reflection text, not the user's entry. Extract exact phrases (2-5 words) from your own response.
 `;
@@ -776,7 +778,7 @@ Please provide your reflection and a concise summary.
                   },
                   type: {
                     type: Type.STRING,
-                    description: "Category: somatic_stressor (physical symptoms OR external triggers like people/deadlines), or identity_win (achievements, voice/agency, emotional recovery)"
+                    description: "Category: main_idea (core insight/central theme, 1-2 max), somatic_stressor (physical symptoms OR external triggers like people/deadlines), or identity_win (achievements, voice/agency, emotional recovery)"
                   }
                 },
                 required: ["text", "type"]

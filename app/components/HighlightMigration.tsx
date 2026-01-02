@@ -268,6 +268,7 @@ export function HighlightMigration() {
         <h4 className="font-medium text-stone-700 mb-2">How it works:</h4>
         <ul className="list-disc list-inside space-y-1">
           <li>Scans your existing journal reflections for highlight-worthy phrases</li>
+          <li>Identifies <span className="text-purple-600 font-medium">main ideas</span> (core insights, key takeaways)</li>
           <li>Identifies <span className="text-red-600 font-medium">stress indicators</span> (physical symptoms, external pressures)</li>
           <li>Identifies <span className="text-amber-600 font-medium">identity wins</span> (achievements, moments of agency)</li>
           <li>Preserves your original reflection text - only adds visual highlights</li>

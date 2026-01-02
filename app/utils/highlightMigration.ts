@@ -35,15 +35,20 @@ export async function extractHighlightsFromReflection(reflectionText: string): P
     const prompt = `Analyze this journal reflection text and identify key phrases (2-5 words each) that should be visually highlighted for the reader.
 
 **Categories:**
-1. **somatic_stressor** (RED highlights): Physical symptoms, body sensations, OR external stressors like people causing stress, deadlines, obligations
+1. **main_idea** (PURPLE highlights): The core insight or central theme - the key takeaway or most important point
+   - Examples: "embrace the uncertainty", "growth through discomfort", "self-compassion matters"
+   - Maximum 1-2 main_idea highlights per reflection
+   
+2. **somatic_stressor** (RED highlights): Physical symptoms, body sensations, OR external stressors like people causing stress, deadlines, obligations
    - Examples: "chest tightening", "couldn't sleep", "Sarah's deadline", "overwhelming workload"
    
-2. **identity_win** (GOLD highlights): Achievements, moments of agency/voice, emotional victories, self-compassion
+3. **identity_win** (GOLD highlights): Achievements, moments of agency/voice, emotional victories, self-compassion
    - Examples: "stood up for myself", "completed the project", "chose to rest", "proud of progress"
 
 **Guidelines:**
 - Extract EXACT phrases that appear in the text (2-5 words)
-- Maximum 4-6 highlights total (don't over-highlight)
+- Maximum 5-7 highlights total (don't over-highlight)
+- Always try to identify at least 1 main_idea if possible
 - Focus on the most impactful phrases
 - Only highlight phrases that genuinely fit the categories
 - If there's nothing meaningful to highlight, return empty array
@@ -58,7 +63,7 @@ Extract highlights:`;
       contents: prompt,
       config: {
         temperature: 0.3,
-        maxOutputTokens: 300,
+        maxOutputTokens: 400,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -75,7 +80,7 @@ Extract highlights:`;
                   },
                   type: {
                     type: Type.STRING,
-                    description: "Category: somatic_stressor or identity_win"
+                    description: "Category: main_idea (core insight, 1-2 max), somatic_stressor (physical/external stress), or identity_win (achievements/agency)"
                   }
                 },
                 required: ["text", "type"]
@@ -91,7 +96,7 @@ Extract highlights:`;
     const highlights: Highlight[] = Array.isArray(data.highlights) 
       ? data.highlights
           .filter((h: any) => h && h.text && h.type)
-          .filter((h: any) => ['somatic_stressor', 'identity_win'].includes(h.type))
+          .filter((h: any) => ['main_idea', 'somatic_stressor', 'identity_win'].includes(h.type))
           .filter((h: any) => {
             // Verify the phrase actually exists in the reflection text (case-insensitive)
             const textLower = reflectionText.toLowerCase();
