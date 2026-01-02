@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { HistoryEntry } from '../types';
 import ReactMarkdown from 'react-markdown';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { EntityTags } from './EntityTags';
 import { HighlightedText } from './HighlightedText';
+import { historyService } from '../services/historyService';
 
 interface HistoryViewProps {
   history: HistoryEntry[];
@@ -21,6 +22,8 @@ interface HistoryViewProps {
   isGeneratingVoice?: boolean;
   generatingAudioId?: string | number | null;
 }
+
+const ITEMS_PER_PAGE = 5;
 
 export const HistoryView: React.FC<HistoryViewProps> = ({
   history,
@@ -39,6 +42,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set());
   const [deleteDialogId, setDeleteDialogId] = useState<string | null>(null);
   const [showClearAllDialog, setShowClearAllDialog] = useState(false);
+  const [displayedHistory, setDisplayedHistory] = useState<HistoryEntry[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
 
   const toggleExpand = (id: string) => {
     const newExpanded = new Set(expandedEntries);
@@ -59,6 +66,56 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  // Initialize displayed history with first page
+  useEffect(() => {
+    if (history.length > 0) {
+      const initialItems = history.slice(0, ITEMS_PER_PAGE);
+      setDisplayedHistory(initialItems);
+      setHasMore(history.length > ITEMS_PER_PAGE);
+      setCurrentPage(1);
+    } else {
+      setDisplayedHistory([]);
+      setHasMore(false);
+    }
+  }, [history]);
+
+  const handleLoadMore = async () => {
+    if (isLoadingMore || !hasMore) return;
+
+    setIsLoadingMore(true);
+    try {
+      const nextPage = currentPage + 1;
+      const offset = nextPage * ITEMS_PER_PAGE;
+      
+      // Check if we have more items in the already-loaded history
+      if (offset < history.length) {
+        const nextItems = history.slice(0, offset);
+        setDisplayedHistory(nextItems);
+        setCurrentPage(nextPage);
+        setHasMore(offset < history.length);
+      } else {
+        // Need to fetch more from server
+        const fetchedHistory = await historyService.fetchHistory({
+          limit: ITEMS_PER_PAGE,
+          offset: offset
+        });
+        
+        if (fetchedHistory.length > 0) {
+          setDisplayedHistory([...displayedHistory, ...fetchedHistory]);
+          setCurrentPage(nextPage);
+          setHasMore(fetchedHistory.length === ITEMS_PER_PAGE);
+        } else {
+          setHasMore(false);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load more history:', error);
+      setHasMore(false);
+    } finally {
+      setIsLoadingMore(false);
+    }
   };
 
   return (
@@ -127,8 +184,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           No past reflections yet.
         </div>
       ) : (
-        <div className="space-y-12 md:space-y-16">
-          {history.map((item) => {
+        <>
+          <div className="space-y-12 md:space-y-16">
+            {displayedHistory.map((item) => {
             const isExpanded = expandedEntries.has(item.id);
             const isLongEntry = item.text.length > 250 || (item.text.match(/\n/g) || []).length > 2;
 
@@ -207,7 +265,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 {/* Journal Entry with Truncation */}
                 <div className="mb-5 md:mb-6 relative">
                   <div className={`
-                    text-stone-800 font-serif leading-relaxed whitespace-pre-wrap text-base md:text-lg transition-all duration-300
+                    text-stone-800 font-serif leading-relaxed whitespace-pre-wrap text-sm md:text-base transition-all duration-300
                     ${!isExpanded && isLongEntry ? 'line-clamp-3 overflow-hidden mask-fade-bottom' : ''}
                   `}>
                     {item.text}
@@ -331,7 +389,35 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               </article>
             );
           })}
-        </div>
+          </div>
+
+          {hasMore && (
+            <div className="mt-12 md:mt-16 flex justify-center">
+              <button
+                onClick={handleLoadMore}
+                disabled={isLoadingMore}
+                className="px-6 py-3 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-700 font-medium text-sm md:text-base transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {isLoadingMore ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Loading...
+                  </>
+                ) : (
+                  <>
+                    Load More
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

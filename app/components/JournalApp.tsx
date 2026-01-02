@@ -511,9 +511,10 @@ const JournalApp: React.FC = () => {
       if (document.visibilityState === 'visible') {
         console.log('[JournalApp] App became visible, checking for pending operations');
         
-        // Resume AudioContext if audio is playing
-        if (isPlayingAudio && audioContextRef.current && audioContextRef.current.state === 'suspended') {
-          console.log('[JournalApp] Resuming AudioContext for background audio playback');
+        // Resume AudioContext if audio is playing (handle both suspended and interrupted states)
+        if (isPlayingAudio && audioContextRef.current && 
+            (audioContextRef.current.state === 'suspended' || audioContextRef.current.state === 'interrupted')) {
+          console.log(`[JournalApp] Resuming AudioContext for background audio playback (state: ${audioContextRef.current.state})`);
           try {
             await audioContextRef.current.resume();
             console.log('[JournalApp] AudioContext resumed successfully');
@@ -549,9 +550,10 @@ const JournalApp: React.FC = () => {
       } else if (document.visibilityState === 'hidden') {
         console.log('[JournalApp] App became hidden');
         
-        // Ensure AudioContext stays running for background audio playback
-        if (isPlayingAudio && audioContextRef.current && audioContextRef.current.state === 'suspended') {
-          console.log('[JournalApp] App hidden but audio playing, attempting to resume AudioContext');
+        // Ensure AudioContext stays running for background audio playback (handle suspended and interrupted)
+        if (isPlayingAudio && audioContextRef.current && 
+            (audioContextRef.current.state === 'suspended' || audioContextRef.current.state === 'interrupted')) {
+          console.log(`[JournalApp] App hidden but audio playing, attempting to resume AudioContext (state: ${audioContextRef.current.state})`);
           try {
             await audioContextRef.current.resume();
             console.log('[JournalApp] AudioContext resumed for background playback');
@@ -781,8 +783,9 @@ const JournalApp: React.FC = () => {
     if (!isPlayingAudio || !audioContextRef.current) return;
 
     const checkAndResumeAudioContext = async () => {
-      if (audioContextRef.current && audioContextRef.current.state === 'suspended' && isPlayingAudio) {
-        console.log('[JournalApp] AudioContext suspended during playback, attempting to resume...');
+      if (audioContextRef.current && isPlayingAudio && 
+          (audioContextRef.current.state === 'suspended' || audioContextRef.current.state === 'interrupted')) {
+        console.log(`[JournalApp] AudioContext ${audioContextRef.current.state} during playback, attempting to resume...`);
         try {
           await audioContextRef.current.resume();
           console.log('[JournalApp] AudioContext resumed successfully for background playback');
@@ -798,10 +801,11 @@ const JournalApp: React.FC = () => {
     // Set up periodic check (every 2 seconds) to ensure AudioContext stays running
     const interval = setInterval(checkAndResumeAudioContext, 2000);
 
-    // Also listen for state changes
+    // Also listen for state changes (handle both suspended and interrupted)
     const handleStateChange = () => {
-      if (audioContextRef.current && audioContextRef.current.state === 'suspended' && isPlayingAudio) {
-        console.log('[JournalApp] AudioContext state changed to suspended, resuming...');
+      if (audioContextRef.current && isPlayingAudio && 
+          (audioContextRef.current.state === 'suspended' || audioContextRef.current.state === 'interrupted')) {
+        console.log(`[JournalApp] AudioContext state changed to ${audioContextRef.current.state}, resuming...`);
         audioContextRef.current.resume().catch(console.error);
       }
     };
@@ -865,7 +869,8 @@ const JournalApp: React.FC = () => {
   const resumeCurrentAudio = () => {
     if (!shouldContinuePlayingRef.current) return; // Don't resume if stopped
 
-    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+    if (audioContextRef.current && 
+        (audioContextRef.current.state === 'suspended' || audioContextRef.current.state === 'interrupted')) {
       audioContextRef.current.resume().then(() => {
         if (shouldContinuePlayingRef.current) { // Check again after async operation
           setIsPaused(false);
@@ -962,19 +967,21 @@ const JournalApp: React.FC = () => {
         console.log('[playAudioChunk] AudioContext created, state:', ctx.state);
       }
 
-      // On mobile, AudioContext often starts in 'suspended' state and must be resumed
+      // On mobile, AudioContext often starts in 'suspended' or 'interrupted' state and must be resumed
+      // 'suspended' = user interaction required, 'interrupted' = system interrupted (phone call, notification, etc.)
       // This is a security feature - audio can only play after user interaction
-      if (ctx.state === 'suspended') {
-        console.log('[playAudioChunk] AudioContext suspended, attempting to resume...');
+      if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
+        const stateMsg = ctx.state === 'interrupted' ? 'interrupted (system event)' : 'suspended';
+        console.log(`[playAudioChunk] AudioContext ${stateMsg}, attempting to resume...`);
         try {
           await ctx.resume();
           console.log('[playAudioChunk] AudioContext resumed, new state:', ctx.state);
 
           // Double-check - sometimes resume() doesn't work immediately on mobile
-          if (ctx.state === 'suspended') {
-            console.log('[playAudioChunk] Still suspended after resume, waiting...');
+          if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
+            console.log(`[playAudioChunk] Still ${ctx.state} after resume, waiting...`);
             await new Promise(resolve => setTimeout(resolve, 100));
-            if (ctx.state === 'suspended') {
+            if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
               await ctx.resume();
             }
           }
@@ -994,14 +1001,20 @@ const JournalApp: React.FC = () => {
       }
 
       // Ensure context is running - critical for mobile
-      // Final check before proceeding
-      if (ctx.state === 'suspended') {
-        console.log('[playAudioChunk] Final resume attempt...');
+      // Final check before proceeding (handle both suspended and interrupted states)
+      if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
+        console.log(`[playAudioChunk] Final resume attempt for ${ctx.state} state...`);
         await ctx.resume();
+        // Wait a bit and check again
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
 
       if (ctx.state !== 'running') {
-        const errorMsg = `AudioContext is ${ctx.state}. Audio playback requires user interaction. Please tap the play button again.`;
+        // If still not running, provide helpful error message
+        const stateMsg = ctx.state === 'interrupted' 
+          ? 'interrupted (may be due to phone call, notification, or other audio)'
+          : ctx.state;
+        const errorMsg = `AudioContext is ${stateMsg}. Audio playback requires user interaction. Please tap the play button again.`;
         console.error('[playAudioChunk]', errorMsg);
         showToast('Audio requires interaction. Please tap play again.', 'error');
         throw new Error(errorMsg);
@@ -1180,12 +1193,18 @@ const JournalApp: React.FC = () => {
         const ensureContextRunning = async () => {
           let currentState = ctx.state;
           if (currentState !== 'running') {
-            console.log('[playAudioChunk] Context not running before start, attempting to resume...');
+            const stateMsg = currentState === 'interrupted' ? 'interrupted (system event)' : currentState;
+            console.log(`[playAudioChunk] Context not running before start (${stateMsg}), attempting to resume...`);
             await ctx.resume();
+            // Wait a bit for state to update
+            await new Promise(resolve => setTimeout(resolve, 50));
             // Store state after resume to avoid TypeScript type narrowing issues
             currentState = ctx.state;
             if (currentState !== 'running') {
-              throw new Error(`AudioContext is ${currentState}, cannot start playback`);
+              const errorStateMsg = currentState === 'interrupted' 
+                ? 'interrupted (may be due to phone call, notification, or other audio)'
+                : currentState;
+              throw new Error(`AudioContext is ${errorStateMsg}, cannot start playback`);
             }
           }
         };
