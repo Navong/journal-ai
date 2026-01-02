@@ -2,52 +2,57 @@
 
 ## Overview
 
-The app uses **AI-detected semantic highlighting** to create a sophisticated visual narrative in journal reflections. Instead of randomly highlighting keywords, the AI identifies and categorizes meaningful phrases into 4 distinct types, each with purpose-driven styling.
+The app uses **AI-detected semantic highlighting** to create a clean, focused visual narrative in journal reflections. Instead of randomly highlighting keywords, the AI identifies and categorizes meaningful phrases into **2 powerful categories**, each with purpose-driven styling.
 
-## The 4 Highlight Categories
+## The 2 Highlight Categories
 
-### 1. Somatic Markers (Physical Sensations)
-**What it captures:** Body-related experiences mentioned in reflections
-- Examples: "jaw is locking up", "knees are throbbing", "feeling shaky", "chest is tight"
-- **Visual Style:** Subtle red underline with medium weight
-- **Purpose:** Creates a "heat map" of physical stress over time. When scrolling through history, multiple red highlights in a period indicate physical burnout.
+### 1. The Somatic Stressor (Physical + External Stress)
+**What it captures:** 
+- **Physical symptoms:** Body-related stress signals (e.g., "jaw is locking up", "chest is tight", "shoulders tense", "feeling shaky")
+- **External triggers:** People, events, or situations causing stress (e.g., "Sarah's email", "Miller project", "tight deadline", "team meeting")
 
-### 2. Identity Anchors (Personal Strengths)
-**What it captures:** Achievements, resilience, personal growth moments
-- Examples: "pushed through 18 miles", "found your voice", "stayed committed", "showing courage"
-- **Visual Style:** Bold text with subtle gold/amber background
-- **Purpose:** Acts as psychological reinforcement. Seeing "pushed through 18 miles" highlighted in gold every time you mention struggle anchors your sense of capability.
+**Visual Style:** Soft red glow with underline
+- Red underline for visibility
+- Subtle red background tint
+- Medium font weight
 
-### 3. External Stressors (People/Events)
-**What it captures:** Specific entities causing stress or requiring attention
-- Examples: "Sarah's quick sync", "Miller follow-up", "team meeting", "project deadline"
-- **Visual Style:** Grey box with subtle border
-- **Purpose:** Quickly identifies what external factors are consuming mental energy. Pattern recognition across entries reveals recurring stressors.
+**Purpose:** Creates a unified "stress map" showing both how stress manifests physically AND what's causing it. When scrolling through history, clusters of red indicate high-stress periods and reveal patterns of recurring stressors.
 
-### 4. Emotional Shifts (Emotional Transitions)
-**What it captures:** Complex emotions or changes in emotional state
-- Examples: "cozy melancholy", "incredible relief", "feeling lighter", "sense of peace"
-- **Visual Style:** Italic text with subtle blue tint
-- **Purpose:** Tracks emotional journey over time. Blue highlights show the arc from struggle to resolution.
+### 2. The Identity Win (Achievements + Voice + Recovery)
+**What it captures:**
+- **Personal achievements:** Concrete accomplishments (e.g., "pushed through 18 miles", "completed the marathon", "finished the project")
+- **Moments of voice/agency:** Standing up for yourself (e.g., "stood your ground", "set a boundary", "spoke up", "said no")
+- **Emotional recovery:** Progress toward wellbeing (e.g., "finding peace", "feeling lighter", "regaining balance", "sense of relief")
+
+**Visual Style:** Bold text with gold/yellow highlight
+- Bold font for emphasis
+- Warm amber/gold background
+- Subtle shadow for depth
+
+**Purpose:** Acts as psychological reinforcement and builds your personal narrative of strength. These golden highlights become visual anchors of your capability, resilience, and growth. Over time, they form a "trail of wins" showing your journey.
 
 ## How It Works
 
 ### Backend (AI Detection)
 1. **AI Analysis:** When Gemini generates a reflection, it analyzes its own response text
-2. **Category Assignment:** It identifies phrases that fit the 4 categories
+2. **Category Assignment:** It identifies phrases that fit the 2 categories
 3. **Structured Response:** Returns JSON with both text and highlights:
 
 ```json
 {
-  "reflection": "I noticed your jaw is locking up again...",
+  "reflection": "I see your jaw is locking up again from the Miller project stress. But you pushed through 18 miles—that resilience is still there.",
   "highlights": [
     {
       "text": "jaw is locking up",
-      "type": "somatic_marker"
+      "type": "somatic_stressor"
     },
     {
-      "text": "incredible relief",
-      "type": "emotional_shift"
+      "text": "Miller project stress",
+      "type": "somatic_stressor"
+    },
+    {
+      "text": "pushed through 18 miles",
+      "type": "identity_win"
     }
   ]
 }
@@ -62,33 +67,35 @@ The app uses **AI-detected semantic highlighting** to create a sophisticated vis
 
 ## UI Benefits
 
-### 1. Visual Narrative
+### 1. Visual Narrative (Simplified)
 **Problem:** Reading old journals is tedious
-**Solution:** Color-coded highlights let you "re-live" months of entries in seconds
-- See a lot of **red** (somatic) in October? You were physically burnt out
-- See clusters of **gold** (identity) in November? You were achieving growth
-- Recurring **grey** (stressors) names? Time to address that relationship
+**Solution:** Two-color system lets you "re-live" months of entries in seconds
+- **Red clusters** in October? High-stress period with specific triggers visible
+- **Gold clusters** in November? Growth, achievement, recovery period
+- Pattern at a glance: Stress (red) → Win (gold) → Stress → Win shows your rhythm
 
 ### 2. Scan-ability
 **Problem:** People don't re-read journals word-for-word
-**Solution:** Highlights act as visual bookmarks
-- Quickly scan for physical symptoms (red)
-- Find moments of strength (gold)
-- Identify problematic patterns (recurring grey names)
+**Solution:** Just 2 colors = instant clarity
+- **Red = What's hurting you** (physical + external)
+- **Gold = What's healing you** (wins + voice + recovery)
+- No cognitive overload, immediate pattern recognition
 
 ### 3. Psychological Reinforcement
 **Problem:** We forget our strengths during hard times
-**Solution:** Gold-highlighted achievements serve as anchors
-- "You pushed through 18 miles" becomes a visual reminder
-- Builds confidence through pattern recognition
-- Creates a personal mythology of resilience
+**Solution:** Gold wins are always visible
+- "You pushed through 18 miles" becomes a visual anchor
+- Every gold highlight reinforces your capability
+- Red stressors validated, not dismissed
+- Builds a balanced narrative: struggle AND strength
 
 ### 4. High-End Feel
-**Problem:** Generic highlighting looks amateurish
-**Solution:** Sophisticated, purpose-driven design
-- Each color has semantic meaning
-- Styling is subtle and elegant
-- Creates a "designed" experience
+**Problem:** Too many colors looks cluttered
+**Solution:** Refined, purposeful design
+- Only 2 colors = sophisticated restraint
+- Red and gold = classic, timeless palette
+- Subtle styling = elegant, not overwhelming
+- Creates a premium, thoughtful experience
 
 ## Technical Implementation
 
@@ -96,11 +103,7 @@ The app uses **AI-detected semantic highlighting** to create a sophisticated vis
 
 #### Types (`app/types.ts`)
 ```typescript
-export type HighlightType = 
-  | 'somatic_marker' 
-  | 'identity_anchor' 
-  | 'external_stressor' 
-  | 'emotional_shift';
+export type HighlightType = 'somatic_stressor' | 'identity_win';
 
 export interface Highlight {
   text: string;
@@ -112,15 +115,18 @@ highlights?: Highlight[];
 ```
 
 #### AI Service (`app/services/geminiService.ts`)
-- Updated prompt to request 4-category highlights
+- Updated prompt to request **2-category highlights** (simplified from 4)
 - Modified response schema to include `highlights` array
 - Returns structured highlight data with reflection
+- AI instructions emphasize combining physical + external in "somatic_stressor"
+- AI instructions emphasize combining achievements + voice + recovery in "identity_win"
 
 #### UI Component (`app/components/HighlightedText.tsx`)
-- Completely rewritten to use AI-provided highlights
-- No more regex patterns or hardcoded word lists
+- Simplified to use only 2 highlight styles
+- Red glow (somatic_stressor) and gold highlight (identity_win)
 - Precise phrase matching with category-specific styling
 - Smart overlap prevention
+- Processes markdown alongside highlights
 
 #### Database (`prisma/schema.prisma`)
 - Added `highlights Json?` field to `JournalEntry` model
@@ -139,17 +145,15 @@ npx prisma generate
 
 ## Visual Design Guidelines
 
-### Color Palette
-- **Somatic:** Red family (`red-400`) - urgent but not alarming
-- **Identity:** Gold/Amber (`amber-50`, `amber-900`) - warm, affirming
-- **Stressor:** Grey (`stone-100`, `stone-200`) - neutral, factual
-- **Emotional:** Blue (`blue-900`) - calm, reflective
+### Color Palette (Simplified)
+- **Somatic Stressor:** Red family (`red-400` underline, `red-50` background, `red-900` text) - urgent yet soft, validates stress
+- **Identity Win:** Gold/Amber (`amber-50` background, `amber-900` text) - warm, affirming, celebratory
 
 ### Styling Rules
-- **Subtle:** No heavy backgrounds or harsh borders
-- **Readable:** All text maintains high contrast
-- **Elegant:** Use of space, subtle borders, soft colors
-- **Scannable:** Clear visual hierarchy without overwhelming
+- **Just 2 Colors:** Red for stress, gold for wins—nothing else needed
+- **Readable:** High contrast text on subtle backgrounds
+- **Elegant:** Soft backgrounds, clean underlines, no harsh borders
+- **Scannable:** Instant pattern recognition with dual-color system
 
 ## Examples
 
@@ -159,52 +163,72 @@ I see that you're feeling anxious about the upcoming presentation.
 [All words randomly highlighted with no meaning]
 ```
 
-### After (Semantic Highlighting)
+### After (2-Category System)
 ```
-I see that you're chest is tightening again before Sarah's presentation.
-              [red underline]                [grey box]
-You've shown courage in past talks, and that same strength is still there.
-        [gold background]
+I see your chest is tightening again before Sarah's presentation deadline.
+           [red - somatic stressor]      [red - somatic stressor]
+
+You pushed through 18 miles when things were hard. That resilience is still there.
+    [gold - identity win]
 ```
+
+**Why This Works:**
+- Red highlights connect physical symptom ("chest tightening") to external cause ("Sarah's presentation")
+- Gold highlights remind you of past wins as evidence of capability
+- Clean, scannable, meaningful
 
 ## User Experience Flow
 
 1. **Entry Creation**
    - User writes journal entry
    - AI generates reflection with semantic analysis
-   - Highlights automatically applied to meaningful phrases
+   - Highlights automatically applied: red for stress, gold for wins
 
 2. **History Browsing**
    - Scroll through past entries
-   - Visual patterns emerge (red clusters = burnout periods)
-   - Quick scan for specific category (gold = achievements)
+   - Visual patterns emerge instantly:
+     - **Red clusters** = high-stress periods (physical + external)
+     - **Gold clusters** = growth, achievement, recovery periods
+   - See your rhythm: Struggle → Win → Struggle → Win
 
 3. **Pattern Recognition**
-   - Notice recurring grey names (problematic relationships)
-   - Track blue phrases to see emotional journey
-   - Red highlights reveal physical stress accumulation
+   - **Red patterns reveal:**
+     - Recurring physical symptoms (jaw tension every Monday?)
+     - Recurring external triggers (Sarah's emails? Miller project?)
+     - Stress accumulation over time
+   
+   - **Gold patterns reveal:**
+     - Your "greatest hits" of resilience
+     - Moments when you found your voice
+     - Evidence of progress and recovery
 
 4. **Psychological Impact**
-   - Gold highlights reinforce positive identity
-   - Red highlights validate physical experience
-   - Grey highlights identify external factors
-   - Blue highlights show emotional growth
+   - **Red validates:** "My stress is real and has identifiable causes"
+   - **Gold reinforces:** "I have a track record of getting through hard things"
+   - **Balance:** Not toxic positivity (red) or learned helplessness (gold alone)
+   - **Narrative:** "I struggle AND I win" = realistic, empowering story
 
 ## Future Enhancements
 
 ### Possible Extensions
-1. **Heatmap View:** Calendar visualization with color density
-2. **Category Filtering:** Show only entries with specific highlight types
-3. **Trend Analysis:** Graph highlight frequency over time
-4. **Export:** Generate reports focused on specific categories
-5. **Customization:** User-configurable color schemes per category
+1. **Heatmap View:** Calendar showing stress (red) vs. wins (gold) density over time
+2. **Category Filtering:** Toggle to show only red or only gold highlights
+3. **Trend Analysis:** Line graph showing red/gold ratio over months
+4. **Export:** Generate "Stress Report" (red patterns) or "Wins Report" (gold patterns)
+5. **Smart Insights:** "You mention 'Sarah' in 70% of red highlights—pattern?"
 
 ### AI Improvements
-1. **Context Awareness:** Better phrase detection based on user's history
-2. **Personalization:** Learn which phrases matter most to user
-3. **Precision:** Improve category assignment accuracy
-4. **Granularity:** Sub-categories within each main type
+1. **Context Awareness:** Better phrase detection based on user's recurring patterns
+2. **Personalization:** Learn user's specific stressor vocabulary
+3. **Precision:** Improve category assignment (stress vs. win)
+4. **Connections:** Suggest links between stressors and wins ("You ran 5 miles after every Miller meeting")
 
 ## Conclusion
 
-This highlighting system transforms the journal from a static text archive into a **living visual narrative**. Each color tells a story, each pattern reveals insight, and each highlight serves a purpose. It's not decoration—it's meaningful design that enhances the core value proposition: helping users understand themselves through their own words.
+This **simplified 2-category system** transforms the journal into a clean, scannable **visual narrative**:
+- **Red = Stress** (physical + external)
+- **Gold = Wins** (achievements + voice + recovery)
+
+No cognitive overload. No color confusion. Just two meaningful categories that together tell your complete story: **struggle AND strength**. It's not toxic positivity (all gold) or learned helplessness (all red)—it's a balanced, realistic narrative that validates pain while celebrating progress.
+
+The result? A high-end, thoughtful experience that helps users understand themselves through a simple but powerful visual language.
