@@ -69,3 +69,18 @@ export enum ViewMode {
   JOURNAL = 'JOURNAL',
   HISTORY = 'HISTORY'
 }
+
+// AI Reflection Generation Progress Tracking
+export type ReflectionProgressStage =
+  | 'extracting_entities'  // Extracting people, places, events, organizations
+  | 'detecting_mood'       // Auto-detecting emotional state
+  | 'detecting_topic'      // Identifying main subject
+  | 'building_context'     // Generating embeddings and semantic search
+  | 'generating_reflection'; // Creating the final AI response
+
+export interface ReflectionProgress {
+  stage: ReflectionProgressStage;
+  message: string; // User-friendly message for current stage
+}
+
+export type ReflectionProgressCallback = (progress: ReflectionProgress) => void;

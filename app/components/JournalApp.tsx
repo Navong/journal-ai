@@ -16,7 +16,7 @@ interface Navigator {
 }
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Reflection, AppStatus, ViewMode, HistoryEntry, Mood, ChatMessage, AudioPlaybackState } from '../types';
+import { Reflection, AppStatus, ViewMode, HistoryEntry, Mood, ChatMessage, AudioPlaybackState, ReflectionProgress } from '../types';
 import { getJournalReflection, startJournalChat, generateSpeech } from '../services/geminiService';
 import { ReflectionCard } from './ReflectionCard';
 import { HistoryView } from './HistoryView';
@@ -179,6 +179,9 @@ const JournalApp: React.FC = () => {
   const chatSessionRef = useRef<Chat | null>(null);
   const [isSendingChat, setIsSendingChat] = useState(false);
   const [contextRevalidated, setContextRevalidated] = useState(false);
+
+  // Reflection generation progress tracking
+  const [reflectionProgress, setReflectionProgress] = useState<ReflectionProgress | null>(null);
 
   const entryRef = useRef(entry);
 
@@ -1791,6 +1794,7 @@ const JournalApp: React.FC = () => {
     setChatMessages([]);
     chatSessionRef.current = null;
     setCurrentAudioBase64(null);
+    setReflectionProgress(null); // Clear previous progress
     stopCurrentAudio();
 
     try {
@@ -1802,7 +1806,9 @@ const JournalApp: React.FC = () => {
       // Wrap with retry logic for iOS background suspension
       const { reflection: content, summary, topic, mood: detectedMood, entities, highlights } = await withRetry(
         'get-reflection',
-        () => getJournalReflection(entry, selectedMood, history),
+        () => getJournalReflection(entry, selectedMood, history, (progress) => {
+          setReflectionProgress(progress);
+        }),
         3,
         2000
       );
@@ -1819,6 +1825,7 @@ const JournalApp: React.FC = () => {
       setCurrentHistoryId(newId);
       setReflection(newReflection);
       setStatus(AppStatus.SUCCESS);
+      setReflectionProgress(null); // Clear progress on success
 
       const newHistoryEntry: HistoryEntry = {
         id: newId,
@@ -2018,6 +2025,7 @@ const JournalApp: React.FC = () => {
 
       setError(errorMessage);
       setStatus(AppStatus.ERROR);
+      setReflectionProgress(null); // Clear progress on error
     }
   }, [entry, selectedMood, history]);
 
@@ -2452,6 +2460,50 @@ const JournalApp: React.FC = () => {
                   )}
                 </span>
               </button>
+
+              {/* AI Progress Indicator */}
+              {reflectionProgress && status === AppStatus.LOADING && (
+                <div className="flex items-center gap-2 md:gap-3 px-4 md:px-6 py-2 md:py-3 bg-emerald-50/50 border border-emerald-100 rounded-full animate-in fade-in duration-300">
+                  {/* Animated Icon */}
+                  {reflectionProgress.stage === 'extracting_entities' && (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 md:h-4 md:w-4 text-emerald-600 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  )}
+                  {reflectionProgress.stage === 'detecting_mood' && (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 md:h-4 md:w-4 text-emerald-600 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  )}
+                  {reflectionProgress.stage === 'detecting_topic' && (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 md:h-4 md:w-4 text-emerald-600 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                    </svg>
+                  )}
+                  {reflectionProgress.stage === 'building_context' && (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 md:h-4 md:w-4 text-emerald-600 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  )}
+                  {reflectionProgress.stage === 'generating_reflection' && (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 md:h-4 md:w-4 text-emerald-600 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                    </svg>
+                  )}
+
+                  {/* Progress Text */}
+                  <span className="text-[9px] md:text-[10px] text-emerald-700 font-medium uppercase tracking-widest">
+                    {reflectionProgress.message}
+                  </span>
+
+                  {/* Animated Dots */}
+                  <div className="flex gap-0.5 ml-1">
+                    <span className="w-0.5 md:w-1 h-0.5 md:h-1 bg-emerald-400 rounded-full animate-bounce"></span>
+                    <span className="w-0.5 md:w-1 h-0.5 md:h-1 bg-emerald-400 rounded-full animate-bounce [animation-delay:0.2s]"></span>
+                    <span className="w-0.5 md:w-1 h-0.5 md:h-1 bg-emerald-400 rounded-full animate-bounce [animation-delay:0.4s]"></span>
+                  </div>
+                </div>
+              )}
 
               {isMounted ? (
                 <AlertDialog.Root open={showStartNewDialog} onOpenChange={setShowStartNewDialog}>
