@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Chat, Modality, Type } from "@google/genai";
-import { HistoryEntry, ChatMessage, Mood, ExtractedEntities, Highlight } from "../types";
+import { HistoryEntry, ChatMessage, Mood, ExtractedEntities, Highlight, ReflectionProgressCallback } from "../types";
 import logger from "../utils/logger";
 import { extractEntities } from "../utils/entityExtraction";
 import { buildEntityContext, formatEntityContextForPrompt } from "./entityTrackingService";
@@ -619,7 +619,8 @@ Identify the mood:`;
 export const getJournalReflection = async (
   entry: string,
   mood: string,
-  history: HistoryEntry[]
+  history: HistoryEntry[],
+  onProgress?: ReflectionProgressCallback
 ): Promise<{ reflection: string; summary: string; topic?: string; mood?: Mood; entities?: ExtractedEntities; highlights?: Highlight[] }> => {
   const apiKey = getApiKey();
   if (!apiKey) {
@@ -628,6 +629,7 @@ export const getJournalReflection = async (
   const ai = new GoogleGenAI({ apiKey });
 
   // Step 1: Extract entities from current entry (parallel with mood/topic detection)
+  onProgress?.({ stage: 'extracting_entities', message: 'Analyzing entry...' });
   let currentEntities: ExtractedEntities | undefined;
   try {
     log.debug('Extracting entities from current entry');
@@ -644,6 +646,7 @@ export const getJournalReflection = async (
   }
 
   // Step 2: Always auto-detect mood (ignore user-selected mood, use AI detection)
+  onProgress?.({ stage: 'detecting_mood', message: 'Analyzing entry...' });
   let finalMood: Mood = 'none';
   try {
     log.debug('Auto-detecting mood for entry', { entryLength: entry.length });
@@ -662,6 +665,7 @@ export const getJournalReflection = async (
   }
 
   // Step 3: Detect topic FIRST so we can use it for better context selection
+  onProgress?.({ stage: 'detecting_topic', message: 'Analyzing entry...' });
   let detectedTopic: string | undefined;
   try {
     log.debug('Detecting topic for entry');
@@ -677,6 +681,7 @@ export const getJournalReflection = async (
   }
 
   // Step 4: Build entity context from history (last 3 entries)
+  onProgress?.({ stage: 'building_context', message: 'Searching memories...' });
   const entityContext = buildEntityContext(history, 3);
   const entityContextPrompt = formatEntityContextForPrompt(entityContext);
 
@@ -729,15 +734,17 @@ Please provide your reflection and a concise summary.
 1. **The main topic** (1-3 words) - what is the primary subject matter being discussed?
 2. **The emotional mood** - one of: calm, joyful, anxious, tired, reflective, heavy, or none
 3. **Key phrases to highlight** in your reflection text - identify phrases (2-5 words each) that fall into these 3 categories:
-   
+
    **a) Main Idea** - The core insight or central theme of your reflection (1-2 phrases max). This is the key takeaway or most important point you want the user to remember.
-   
+
    **b) Somatic Stressor** - Physical symptoms (e.g., "jaw is locking up", "chest is tight", "shoulders tense") AND external triggers (e.g., "Sarah's email", "Miller project", "tight deadline", "team pressure")
-   
+
    **c) Identity Win** - Personal achievements (e.g., "pushed through 18 miles", "completed the marathon"), moments of voice/agency (e.g., "stood your ground", "set a boundary", "spoke up"), and emotional recovery (e.g., "finding peace", "feeling lighter", "regaining balance")
 
 **Important:** Only highlight phrases that appear in YOUR reflection text, not the user's entry. Extract exact phrases (2-5 words) from your own response.
 `;
+
+  onProgress?.({ stage: 'generating_reflection', message: 'Crafting reflection...' });
 
   try {
     const response = await ai.models.generateContent({
