@@ -16,7 +16,7 @@ interface Navigator {
 }
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Reflection, AppStatus, ViewMode, HistoryEntry, Mood, ChatMessage, AudioPlaybackState, ReflectionProgress } from '../types';
+import { Reflection, AppStatus, ViewMode, HistoryEntry, Mood, ChatMessage, AudioPlaybackState, ReflectionProgress, TokenUsage, CumulativeTokenUsage } from '../types';
 import { getJournalReflection, startJournalChat, generateSpeech } from '../services/geminiService';
 import { ReflectionCard } from './ReflectionCard';
 import { HistoryView } from './HistoryView';
@@ -182,6 +182,16 @@ const JournalApp: React.FC = () => {
 
   // Reflection generation progress tracking
   const [reflectionProgress, setReflectionProgress] = useState<ReflectionProgress | null>(null);
+
+  // Token usage tracking for cost transparency
+  const [currentTokenUsage, setCurrentTokenUsage] = useState<TokenUsage | null>(null);
+  const [cumulativeTokenUsage, setCumulativeTokenUsage] = useState<CumulativeTokenUsage>({
+    totalPromptTokens: 0,
+    totalCachedTokens: 0,
+    totalCompletionTokens: 0,
+    totalTokens: 0,
+    requestCount: 0,
+  });
 
   const entryRef = useRef(entry);
 
@@ -1804,7 +1814,7 @@ const JournalApp: React.FC = () => {
       }
 
       // Wrap with retry logic for iOS background suspension
-      const { reflection: content, summary, topic, mood: detectedMood, entities, highlights } = await withRetry(
+      const { reflection: content, summary, topic, mood: detectedMood, entities, highlights, tokenUsage } = await withRetry(
         'get-reflection',
         () => getJournalReflection(entry, selectedMood, history, (progress) => {
           console.log('[JournalApp] Progress update:', progress.stage, progress.message);
@@ -1813,6 +1823,18 @@ const JournalApp: React.FC = () => {
         3,
         2000
       );
+
+      // Update token usage tracking
+      if (tokenUsage) {
+        setCurrentTokenUsage(tokenUsage);
+        setCumulativeTokenUsage(prev => ({
+          totalPromptTokens: prev.totalPromptTokens + tokenUsage.promptTokens,
+          totalCachedTokens: prev.totalCachedTokens + (tokenUsage.cachedTokens || 0),
+          totalCompletionTokens: prev.totalCompletionTokens + tokenUsage.completionTokens,
+          totalTokens: prev.totalTokens + tokenUsage.totalTokens,
+          requestCount: prev.requestCount + 1,
+        }));
+      }
       console.log(`[JournalApp] Received reflection with topic: "${topic}", mood: "${detectedMood}", entities:`, entities, 'highlights:', highlights);
       const newReflection = {
         content,
@@ -2159,6 +2181,14 @@ const JournalApp: React.FC = () => {
     setStatus(AppStatus.IDLE);
     setError(null);
     setCurrentHistoryId(null);
+    setCurrentTokenUsage(null);
+    setCumulativeTokenUsage({
+      totalPromptTokens: 0,
+      totalCachedTokens: 0,
+      totalCompletionTokens: 0,
+      totalTokens: 0,
+      requestCount: 0,
+    });
     chatSessionRef.current = null;
     if (typeof window !== 'undefined') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -2613,6 +2643,65 @@ const JournalApp: React.FC = () => {
               playbackRate={playbackRate}
               onPlaybackRateChange={setPlaybackSpeed}
             />
+
+            {/* Token Usage Display */}
+            {currentTokenUsage && status === AppStatus.SUCCESS && (
+              <div className="mt-4 px-4 md:px-6 py-3 bg-stone-50/50 border border-stone-100 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-semibold text-stone-600 uppercase tracking-wide">Token Usage</h3>
+                  {cumulativeTokenUsage.requestCount > 1 && (
+                    <span className="text-xs text-stone-400">
+                      {cumulativeTokenUsage.requestCount} requests
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                  <div>
+                    <div className="text-stone-400 mb-0.5">Input</div>
+                    <div className="font-medium text-stone-700">
+                      {currentTokenUsage.promptTokens.toLocaleString()}
+                      {currentTokenUsage.cachedTokens && currentTokenUsage.cachedTokens > 0 && (
+                        <span className="text-emerald-600 ml-1" title="Cached tokens (cost savings)">
+                          ({currentTokenUsage.cachedTokens.toLocaleString()} cached)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-stone-400 mb-0.5">Output</div>
+                    <div className="font-medium text-stone-700">
+                      {currentTokenUsage.completionTokens.toLocaleString()}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-stone-400 mb-0.5">Total</div>
+                    <div className="font-medium text-stone-700">
+                      {currentTokenUsage.totalTokens.toLocaleString()}
+                    </div>
+                  </div>
+                  {cumulativeTokenUsage.requestCount > 1 && (
+                    <div>
+                      <div className="text-stone-400 mb-0.5">Session Total</div>
+                      <div className="font-medium text-stone-700">
+                        {cumulativeTokenUsage.totalTokens.toLocaleString()}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {currentTokenUsage.cachedTokens && currentTokenUsage.cachedTokens > 0 && (
+                  <div className="mt-2 pt-2 border-t border-stone-100">
+                    <div className="flex items-center gap-1.5 text-xs text-emerald-600">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span>
+                        {currentTokenUsage.cachedTokens.toLocaleString()} tokens served from cache (reduced cost)
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {status === AppStatus.SUCCESS && reflection && (
               <div className="mt-6 md:mt-8 flex justify-center md:justify-start">

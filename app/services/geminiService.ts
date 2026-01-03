@@ -1,6 +1,6 @@
 
-import { GoogleGenAI, Chat, Modality, Type } from "@google/genai";
-import { HistoryEntry, ChatMessage, Mood, ExtractedEntities, Highlight, ReflectionProgressCallback } from "../types";
+import { GoogleGenAI, Chat, Modality, Type, createUserContent } from "@google/genai";
+import { HistoryEntry, ChatMessage, Mood, ExtractedEntities, Highlight, ReflectionProgressCallback, TokenUsage } from "../types";
 import logger from "../utils/logger";
 import { extractEntities } from "../utils/entityExtraction";
 import { buildEntityContext, formatEntityContextForPrompt } from "./entityTrackingService";
@@ -508,6 +508,84 @@ const getApiKey = (): string => {
   return process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
 };
 
+// Cache manager for explicit Gemini API context caching
+// This reduces costs by caching the large system instruction that's reused across requests
+interface CacheInfo {
+  name: string;
+  expireTime: number;
+}
+
+let systemInstructionCache: CacheInfo | null = null;
+const CACHE_TTL_SECONDS = 3600; // 1 hour (default TTL)
+const MODEL_NAME = 'gemini-3-flash-preview';
+
+// Note: Chat API (ai.chats.create) uses dynamic system instructions that include
+// entry-specific context, so explicit caching isn't applicable there.
+// The main benefit is in reflection generation which uses the static SYSTEM_INSTRUCTION.
+
+// Get or create a cache for the system instruction
+async function getSystemInstructionCache(ai: GoogleGenAI): Promise<string | null> {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    return null;
+  }
+
+  // Check if we have a valid cache
+  if (systemInstructionCache && systemInstructionCache.expireTime > Date.now()) {
+    try {
+      // Verify cache still exists (it might have been deleted externally)
+      await ai.caches.get({ name: systemInstructionCache.name });
+      log.debug('Using existing system instruction cache', { cacheName: systemInstructionCache.name });
+      return systemInstructionCache.name;
+    } catch (error) {
+      // Cache was deleted, create a new one
+      log.debug('Existing cache not found, creating new one');
+      systemInstructionCache = null;
+    }
+  }
+
+  // Create a new cache
+  try {
+    // Estimate tokens for system instruction (rough: 4 chars = 1 token)
+    const systemInstructionTokens = Math.ceil(SYSTEM_INSTRUCTION.length / 4);
+
+    // Only use explicit caching if system instruction meets minimum token requirement
+    // Gemini 3 Flash Preview minimum: 1024 tokens
+    if (systemInstructionTokens < 1024) {
+      log.debug('System instruction too small for explicit caching', { tokens: systemInstructionTokens });
+      return null;
+    }
+
+    log.info('Creating system instruction cache', { estimatedTokens: systemInstructionTokens });
+
+    const cache = await ai.caches.create({
+      model: MODEL_NAME,
+      config: {
+        contents: createUserContent(SYSTEM_INSTRUCTION),
+        systemInstruction: SYSTEM_INSTRUCTION,
+        ttl: `${CACHE_TTL_SECONDS}s`,
+      },
+    });
+
+    // Store cache info with expiration
+    systemInstructionCache = {
+      name: cache.name || '',
+      expireTime: Date.now() + (CACHE_TTL_SECONDS * 1000),
+    };
+
+    log.info('System instruction cache created', {
+      cacheName: cache.name,
+      expiresIn: `${CACHE_TTL_SECONDS}s`
+    });
+
+    return cache.name || null;
+  } catch (error) {
+    log.error('Failed to create system instruction cache', {}, error as Error);
+    // Fall back to non-cached requests
+    return null;
+  }
+}
+
 export const detectMood = async (entry: string): Promise<Mood> => {
   const entryLength = entry.trim().length;
   log.debug('Mood detection called', { entryLength });
@@ -550,7 +628,7 @@ Identify the mood:`;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: MODEL_NAME,
       contents: moodDetectionPrompt,
       config: {
         temperature: 0.5, // Lower temperature for more consistent mood detection
@@ -621,7 +699,7 @@ export const getJournalReflection = async (
   mood: string,
   history: HistoryEntry[],
   onProgress?: ReflectionProgressCallback
-): Promise<{ reflection: string; summary: string; topic?: string; mood?: Mood; entities?: ExtractedEntities; highlights?: Highlight[] }> => {
+): Promise<{ reflection: string; summary: string; topic?: string; mood?: Mood; entities?: ExtractedEntities; highlights?: Highlight[]; tokenUsage?: TokenUsage }> => {
   const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured. Please set NEXT_PUBLIC_GEMINI_API_KEY in your .env.local file');
@@ -634,7 +712,7 @@ export const getJournalReflection = async (
   try {
     log.debug('Extracting entities from current entry');
     currentEntities = await extractEntities(entry);
-    log.info('Entities extracted', { 
+    log.info('Entities extracted', {
       people: currentEntities.people.length,
       places: currentEntities.places.length,
       events: currentEntities.events.length,
@@ -747,62 +825,95 @@ Please provide your reflection and a concise summary.
   onProgress?.({ stage: 'generating_reflection', message: 'Crafting reflection...' });
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        temperature: 0.7,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            reflection: { 
-              type: Type.STRING, 
-              description: "The AI's deep empathetic response with specific entity acknowledgment. Use names, places, and events BY NAME when relevant."
-            },
-            summary: { 
-              type: Type.STRING, 
-              description: "A one-sentence summary of the entry's core theme." 
-            },
-            topic: {
-              type: Type.STRING,
-              description: "The main topic or theme (1-3 words) - what is the primary subject matter being discussed? Examples: work stress, family conflict, health anxiety, creative projects, relationship struggles, career planning, etc. Focus on WHAT they're writing about, not emotional state."
-            },
-            mood: {
-              type: Type.STRING,
-              description: "The emotional mood or state: calm (peaceful, relaxed, serene), joyful (happy, excited, positive, grateful), anxious (worried, nervous, stressed, overwhelmed), tired (exhausted, drained, fatigued), reflective (thoughtful, contemplative, introspective), heavy (sad, burdened, melancholic, down), or none (neutral, unclear, or mixed emotions). Return ONE mood that best represents the overall emotional tone."
-            },
-            highlights: {
-              type: Type.ARRAY,
-              description: "Key phrases from YOUR reflection text to highlight for visual emphasis. Extract exact phrases (2-5 words) that appear in your response.",
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  text: {
-                    type: Type.STRING,
-                    description: "The exact phrase to highlight (must appear in your reflection text)"
-                  },
-                  type: {
-                    type: Type.STRING,
-                    description: "Category: main_idea (core insight/central theme, 1-2 max), somatic_stressor (physical symptoms OR external triggers like people/deadlines), or identity_win (achievements, voice/agency, emotional recovery)"
-                  }
-                },
-                required: ["text", "type"]
-              }
-            }
+    // Get cached system instruction if available
+    const cachedContentName = await getSystemInstructionCache(ai);
+
+    const config: any = {
+      temperature: 0.7,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          reflection: {
+            type: Type.STRING,
+            description: "The AI's deep empathetic response with specific entity acknowledgment. Use names, places, and events BY NAME when relevant."
           },
-          required: ["reflection", "summary", "topic", "mood", "highlights"]
-        }
-      },
+          summary: {
+            type: Type.STRING,
+            description: "A one-sentence summary of the entry's core theme."
+          },
+          topic: {
+            type: Type.STRING,
+            description: "The main topic or theme (1-3 words) - what is the primary subject matter being discussed? Examples: work stress, family conflict, health anxiety, creative projects, relationship struggles, career planning, etc. Focus on WHAT they're writing about, not emotional state."
+          },
+          mood: {
+            type: Type.STRING,
+            description: "The emotional mood or state: calm (peaceful, relaxed, serene), joyful (happy, excited, positive, grateful), anxious (worried, nervous, stressed, overwhelmed), tired (exhausted, drained, fatigued), reflective (thoughtful, contemplative, introspective), heavy (sad, burdened, melancholic, down), or none (neutral, unclear, or mixed emotions). Return ONE mood that best represents the overall emotional tone."
+          },
+          highlights: {
+            type: Type.ARRAY,
+            description: "Key phrases from YOUR reflection text to highlight for visual emphasis. Extract exact phrases (2-5 words) that appear in your response.",
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                text: {
+                  type: Type.STRING,
+                  description: "The exact phrase to highlight (must appear in your reflection text)"
+                },
+                type: {
+                  type: Type.STRING,
+                  description: "Category: main_idea (core insight/central theme, 1-2 max), somatic_stressor (physical symptoms OR external triggers like people/deadlines), or identity_win (achievements, voice/agency, emotional recovery)"
+                }
+              },
+              required: ["text", "type"]
+            }
+          }
+        },
+        required: ["reflection", "summary", "topic", "mood", "highlights"]
+      }
+    };
+
+    // Use cached content if available, otherwise use system instruction directly
+    if (cachedContentName) {
+      config.cachedContent = cachedContentName;
+      log.debug('Using cached system instruction for reflection', { cacheName: cachedContentName });
+    } else {
+      config.systemInstruction = SYSTEM_INSTRUCTION;
+      log.debug('Using direct system instruction for reflection (no cache)');
+    }
+
+    const response = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: prompt,
+      config,
     });
 
     const data = JSON.parse(response.text || "{}");
     const reflectionContent = data.reflection || "I'm processing your thoughts. Thank you for sharing.";
     const summaryContent = data.summary || "A moment of reflection.";
     const highlights: Highlight[] = Array.isArray(data.highlights) ? data.highlights : [];
-    
+
     log.info('AI returned highlights', { count: highlights.length, highlights });
+
+    // Extract token usage from response
+    let tokenUsage: TokenUsage | undefined;
+    try {
+      // The response should have usage_metadata field
+      const usage = (response as any).usageMetadata || (response as any).usage_metadata;
+      if (usage) {
+        tokenUsage = {
+          promptTokens: usage.promptTokenCount || usage.prompt_token_count || 0,
+          cachedTokens: usage.cachedContentTokenCount || usage.cached_content_token_count || undefined,
+          completionTokens: usage.candidatesTokenCount || usage.candidates_token_count || usage.completionTokenCount || usage.completion_token_count || 0,
+          totalTokens: usage.totalTokenCount || usage.total_token_count || 0,
+        };
+        log.info('Token usage extracted', tokenUsage);
+      } else {
+        log.debug('No usage metadata found in response');
+      }
+    } catch (error) {
+      log.warn('Failed to extract token usage', {}, error as Error);
+    }
 
     // Mood from reflection response (most accurate - AI understands full context)
     let reflectionMood: Mood | undefined;
@@ -886,7 +997,8 @@ Please provide your reflection and a concise summary.
       topic: finalTopic,
       mood: finalMood,
       entities: currentEntities, // Return extracted entities to be saved with the entry
-      highlights: highlights // Return AI-detected highlights for UI emphasis
+      highlights: highlights, // Return AI-detected highlights for UI emphasis
+      tokenUsage: tokenUsage // Return token usage for cost transparency
     };
   } catch (error) {
     log.error('Gemini API error during reflection generation', {}, error as Error);
@@ -923,7 +1035,7 @@ export const startJournalChat = async (
   );
 
   return ai.chats.create({
-    model: 'gemini-3-flash-preview',
+    model: MODEL_NAME,
     config: {
       systemInstruction: `${SYSTEM_INSTRUCTION}
 
@@ -1018,7 +1130,7 @@ Identify the main topic:`;
   try {
     // Use structured output for more reliable topic detection
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: MODEL_NAME,
       contents: topicDetectionPrompt,
       config: {
         temperature: 0.5, // Balanced for understanding and consistency
@@ -1216,7 +1328,7 @@ export const generateSpeech = async (
       const { audioCache } = await import('../utils/audioCache');
       const cached = await audioCache.get(text);
       if (cached) {
-        log.debug('TTS Cache Hit: IndexedDB', { 
+        log.debug('TTS Cache Hit: IndexedDB', {
           textLength: text.length,
           audioLength: typeof cached === 'string' ? cached.length : 'array'
         });
@@ -1311,9 +1423,9 @@ export const generateSpeech = async (
         // For chunked audio, we can store the first chunk for cache hit
         // (full playback will use all chunks, but cache hit detection uses first chunk)
         await audioCache.set(text, results[0]);
-        log.debug('TTS: Saved chunked audio to IndexedDB cache', { 
+        log.debug('TTS: Saved chunked audio to IndexedDB cache', {
           chunks: results.length,
-          textLength: text.length 
+          textLength: text.length
         });
       } catch (error) {
         log.warn('Failed to save chunked audio to cache', {}, error as Error);
@@ -1330,7 +1442,7 @@ export const generateSpeech = async (
   try {
     const result = await request;
     pendingTTSRequests.delete(textHash);
-    
+
     // Save to IndexedDB cache after successful generation
     if (result && useCache && typeof window !== 'undefined') {
       try {
@@ -1342,7 +1454,7 @@ export const generateSpeech = async (
         // Don't throw - generation succeeded, cache save is optional
       }
     }
-    
+
     return result;
   } catch (error) {
     pendingTTSRequests.delete(textHash);
