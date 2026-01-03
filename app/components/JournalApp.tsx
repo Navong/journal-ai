@@ -324,12 +324,18 @@ const JournalApp: React.FC = () => {
               }
 
               console.log('[JournalApp] Fetching history and preferences...');
-              const [loadedHistory, preferences] = await Promise.all([
-                historyService.fetchHistory(),
+              // Only fetch first page on initial load to avoid loading all history
+              const [historyResult, preferences] = await Promise.all([
+                historyService.fetchHistory({ limit: 5, offset: 0 }),
                 historyService.getPreferences(),
               ]);
 
-              console.log(`[JournalApp] Received ${loadedHistory?.length || 0} entries and preferences:`, preferences);
+              // Handle both old format (array) and new format (object with entries)
+              const loadedHistory = Array.isArray(historyResult) 
+                ? historyResult 
+                : historyResult.entries || [];
+
+              console.log(`[JournalApp] Received ${loadedHistory.length} entries and preferences:`, preferences);
 
               // Final check before setting state
               if (prevUserIdRef.current !== currentUserId && !isInitialHydration) {
@@ -337,8 +343,8 @@ const JournalApp: React.FC = () => {
                 return; // User changed during API call, don't set stale data
               }
 
-              console.log(`[JournalApp] ✅ Setting history with ${loadedHistory?.length || 0} entries`);
-              setHistory(loadedHistory || []);
+              console.log(`[JournalApp] ✅ Setting history with ${loadedHistory.length} entries`);
+              setHistory(loadedHistory);
 
               if (preferences) {
                 setAutoPlayEnabled(preferences.auto_play_enabled);
@@ -579,12 +585,16 @@ const JournalApp: React.FC = () => {
     // Only refetch if we're switching to History view and component is mounted
     if (viewMode === ViewMode.HISTORY && isMounted) {
       if (!isDemoMode && userId) {
-        // Authenticated mode: fetch from backend
+        // Authenticated mode: fetch from backend (only first page to avoid loading all history)
         console.log('[JournalApp] History view opened, refetching history from backend...');
-        historyService.fetchHistory()
-          .then((loadedHistory) => {
-            console.log(`[JournalApp] ✅ Refetched ${loadedHistory?.length || 0} entries for History view`);
-            setHistory(loadedHistory || []);
+        historyService.fetchHistory({ limit: 5, offset: 0 })
+          .then((historyResult) => {
+            // Handle both old format (array) and new format (object with entries)
+            const loadedHistory = Array.isArray(historyResult) 
+              ? historyResult 
+              : historyResult.entries || [];
+            console.log(`[JournalApp] ✅ Refetched ${loadedHistory.length} entries for History view`);
+            setHistory(loadedHistory);
           })
           .catch((error) => {
             console.error('[JournalApp] Failed to refetch history for History view:', error);
@@ -2220,9 +2230,12 @@ const JournalApp: React.FC = () => {
       } catch (error) {
         console.error('Failed to clear history from Supabase:', error);
         showToast('Failed to clear history', 'error');
-        // Try to reload history on error
+        // Try to reload history on error (only first page)
         try {
-          const loadedHistory = await historyService.fetchHistory();
+          const historyResult = await historyService.fetchHistory({ limit: 5, offset: 0 });
+          const loadedHistory = Array.isArray(historyResult) 
+            ? historyResult 
+            : historyResult.entries || [];
           setHistory(loadedHistory);
         } catch (e) {
           // Ignore reload errors

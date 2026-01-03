@@ -95,7 +95,9 @@ export async function getSyncStats(): Promise<{
 }> {
   try {
     const audioEntries = await audioCache.getAllEntries();
-    const journalEntries = await historyService.fetchHistory({ includeAudio: false }); // Don't fetch audio, just check which need it
+    const historyResult = await historyService.fetchHistory({ includeAudio: false }); // Don't fetch audio, just check which need it
+    // Handle both old format (array) and new format (object with entries)
+    const journalEntries = Array.isArray(historyResult) ? historyResult : historyResult.entries || [];
 
     const reflectionHashMap = new Map<string, string>();
     for (const entry of journalEntries) {
@@ -178,7 +180,9 @@ export async function syncAudioToDatabase(
     }
 
     // Get journal entries (without audio for performance)
-    const journalEntries = await historyService.fetchHistory({ includeAudio: false });
+    const historyResult = await historyService.fetchHistory({ includeAudio: false });
+    // Handle both old format (array) and new format (object with entries)
+    const journalEntries = Array.isArray(historyResult) ? historyResult : historyResult.entries || [];
 
     if (journalEntries.length === 0) {
       console.log('[audioSync] No journal entries found');
