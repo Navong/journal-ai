@@ -1204,6 +1204,19 @@ Identify the main topic:`;
 // Request deduplication map
 const pendingTTSRequests = new Map<string, Promise<string | undefined>>();
 
+/**
+ * Converts ArrayBuffer to base64 string
+ * Used for converting binary audio to base64 for storage compatibility
+ */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
 // Chunk text into smaller pieces for TTS (respecting sentence boundaries when possible)
 function chunkTextForTTS(text: string, maxLength: number = 1500): string[] {
   const cleaned = cleanTextForTTS(text);
@@ -1255,10 +1268,13 @@ function chunkTextForTTS(text: string, maxLength: number = 1500): string[] {
 }
 
 // Generate speech using server-side API (prevents rate limit issues)
+// Now supports streaming chunks from server for better performance
+// Optional onProgress callback for progressive playback
 async function generateSpeechChunk(
   text: string,
   retries: number = 3,
-  delay: number = 1000
+  delay: number = 1000,
+  onProgress?: (partialBase64: string, isComplete: boolean) => void
 ): Promise<string | undefined> {
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
@@ -1295,8 +1311,128 @@ async function generateSpeechChunk(
         throw new Error(errorData.message || `TTS API error: ${response.status}`);
       }
 
-      const data = await response.json();
-      return data.audioData;
+      // Check if response is binary streaming (audio/wav) or regular JSON
+      const contentType = response.headers.get('Content-Type') || '';
+      if (contentType.includes('audio/wav') || contentType.includes('audio/')) {
+        // Handle streaming binary audio response
+        const reader = response.body?.getReader();
+
+        if (!reader) {
+          throw new Error('No response body reader available');
+        }
+
+        try {
+          const chunks: Uint8Array[] = [];
+          let totalBytes = 0;
+          let chunkCount = 0;
+          const streamStartTime = Date.now();
+          let firstChunkTime: number | null = null;
+          
+          // Progressive playback: buffer enough to start playing (200KB or 50 chunks)
+          const MIN_BUFFER_SIZE = 200 * 1024; // 200KB
+          const MIN_CHUNK_COUNT = 50;
+          let hasTriggeredProgress = false;
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            if (value) {
+              if (firstChunkTime === null) {
+                firstChunkTime = Date.now();
+                log.debug(`[TTS] First chunk received from server in ${firstChunkTime - streamStartTime}ms (${value.length} bytes)`);
+              }
+
+              // Store binary chunks directly
+              chunks.push(value);
+              totalBytes += value.length;
+              chunkCount++;
+
+              // Log progress for first 5 chunks, then every 10
+              if (chunkCount <= 5 || chunkCount % 10 === 0) {
+                const elapsed = Date.now() - streamStartTime;
+                const rate = (totalBytes / 1024) / (elapsed / 1000);
+                log.debug(`[TTS] Received chunk ${chunkCount}: ${value.length} bytes, total: ${(totalBytes / 1024).toFixed(0)}KB, rate: ${rate.toFixed(2)}KB/s`);
+              }
+
+              // Progressive playback: trigger callback once we have enough data to start playing
+              // Try to play as soon as we have 200KB - WAV decoder might work with partial data
+              if (onProgress && !hasTriggeredProgress && (totalBytes >= MIN_BUFFER_SIZE || chunkCount >= MIN_CHUNK_COUNT)) {
+                hasTriggeredProgress = true;
+                
+                // Combine current chunks for progressive playback
+                const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+                const combined = new Uint8Array(totalLength);
+                let offset = 0;
+                for (const chunk of chunks) {
+                  combined.set(chunk, offset);
+                  offset += chunk.length;
+                }
+                
+                const partialBase64 = arrayBufferToBase64(combined.buffer);
+                const progressTime = Date.now() - streamStartTime;
+                log.debug(`[TTS] Progressive playback ready: ${chunkCount} chunks, ${(totalBytes / 1024).toFixed(0)}KB in ${progressTime}ms - attempting early playback`);
+                
+                // Call progress callback with partial audio marked as complete to try early playback
+                // If WAV decoder fails, we'll call again when stream completes
+                onProgress(partialBase64, true);
+              }
+            }
+          }
+
+          const totalTime = Date.now() - streamStartTime;
+          log.debug(`[TTS] Stream complete: ${chunkCount} chunks, ${totalBytes} bytes in ${totalTime}ms (${(totalBytes / 1024 / (totalTime / 1000)).toFixed(2)}KB/s)`);
+
+          if (chunks.length === 0) {
+            throw new Error('No audio chunks received from stream');
+          }
+
+          // Combine binary chunks into single ArrayBuffer
+          let combinedBuffer: ArrayBuffer;
+          if (chunks.length === 1) {
+            combinedBuffer = chunks[0].buffer.slice(chunks[0].byteOffset, chunks[0].byteOffset + chunks[0].byteLength);
+          } else {
+            const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+            const combined = new Uint8Array(totalLength);
+            let offset = 0;
+            for (const chunk of chunks) {
+              combined.set(chunk, offset);
+              offset += chunk.length;
+            }
+            combinedBuffer = combined.buffer;
+          }
+
+          log.debug('Received streaming binary audio', { 
+            chunks: chunks.length, 
+            totalBytes,
+            bufferSize: combinedBuffer.byteLength 
+          });
+
+          // Convert to base64 only for storage/compatibility with existing code
+          // The frontend will decode this back to binary for playback
+          const base64Audio = arrayBufferToBase64(combinedBuffer);
+          
+          // Call progress callback with complete audio if it was provided
+          // Only call if we haven't already triggered progress (to avoid duplicate playback)
+          if (onProgress && !hasTriggeredProgress) {
+            onProgress(base64Audio, true);
+          } else if (onProgress && hasTriggeredProgress) {
+            // Stream completed - update with final complete audio in case early playback failed
+            // Use a small delay to avoid interrupting if early playback succeeded
+            setTimeout(() => {
+              onProgress(base64Audio, true);
+            }, 100);
+          }
+          
+          return base64Audio;
+        } finally {
+          reader.releaseLock();
+        }
+      } else {
+        // Fallback to regular JSON response (backward compatibility)
+        const data = await response.json();
+        return data.audioData;
+      }
     } catch (error: any) {
       const isLastAttempt = attempt === retries - 1;
       if (isLastAttempt) {
@@ -1314,11 +1450,16 @@ async function generateSpeechChunk(
 }
 
 // Main function with deduplication and chunking support
+// Optional onProgress callback for progressive playback (receives partial audio as it streams)
 export const generateSpeech = async (
   text: string,
-  options?: { useCache?: boolean; chunked?: boolean }
+  options?: { 
+    useCache?: boolean; 
+    chunked?: boolean;
+    onProgress?: (partialBase64: string, isComplete: boolean) => void;
+  }
 ): Promise<string | string[] | undefined> => {
-  const { useCache = true, chunked = false } = options || {};
+  const { useCache = true, chunked = false, onProgress } = options || {};
 
   // ========================================
   // LAYER 1: Check IndexedDB Cache (Local, Instant)
@@ -1366,7 +1507,7 @@ export const generateSpeech = async (
 
     if (chunks.length === 1) {
       // Single chunk, no need for chunking
-      const request = generateSpeechChunk(chunks[0]);
+      const request = generateSpeechChunk(chunks[0], 3, 1000, onProgress);
       pendingTTSRequests.set(textHash, request);
       try {
         const result = await request;
@@ -1400,7 +1541,7 @@ export const generateSpeech = async (
         await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_CHUNKS_MS));
       }
 
-      const request = generateSpeechChunk(chunk);
+      const request = generateSpeechChunk(chunk, 3, 1000, undefined); // No progress callback for chunked audio
       pendingTTSRequests.set(chunkHash, request);
 
       try {
@@ -1436,7 +1577,7 @@ export const generateSpeech = async (
   }
 
   // Single generation (original behavior for backward compatibility)
-  const request = generateSpeechChunk(text);
+  const request = generateSpeechChunk(text, 3, 1000, onProgress);
   pendingTTSRequests.set(textHash, request);
 
   try {

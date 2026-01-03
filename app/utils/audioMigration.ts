@@ -5,7 +5,6 @@
 
 import { audioCache } from './audioCache';
 import { historyService } from '../services/historyService';
-import { optimizeAudio } from './audioOptimizer';
 import { hashText } from './textHash';
 
 export interface MigrationProgress {
@@ -112,13 +111,9 @@ export async function migrateAudioToDatabase(
       result.matched++;
 
       try {
-        // Optimize audio
-        console.log(`[audioMigration] Optimizing audio for entry ${matchingEntry.id}...`);
-        const optimizedAudio = await optimizeAudio(audioEntry.audioBase64);
-
         // Save to database
-        console.log(`[audioMigration] Saving optimized audio for entry ${matchingEntry.id}...`);
-        await historyService.saveEntryAudio(matchingEntry.id, optimizedAudio);
+        console.log(`[audioMigration] Saving audio for entry ${matchingEntry.id}...`);
+        await historyService.saveEntryAudio(matchingEntry.id, audioEntry.audioBase64);
 
         result.saved++;
         console.log(`[audioMigration] ✅ Successfully migrated audio for entry ${matchingEntry.id}`);

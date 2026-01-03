@@ -28,7 +28,6 @@ import { generateUUID } from '../utils/uuid';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { useSession, signOut } from 'next-auth/react';
 import { historyService } from '../services/historyService';
-import { optimizeAudio } from '../utils/audioOptimizer';
 import { syncAudioToDatabase, getSyncStats, shouldRunSync, getSyncState, AudioSyncProgress, SYNC_INTERVAL } from '../utils/audioSync';
 
 // Generate user-scoped keys to prevent data leakage between users
@@ -1458,11 +1457,60 @@ const JournalApp: React.FC = () => {
             const textLength = reflection.content.length;
             const needsChunking = textLength > 1500;
 
+            let hasStartedPlaying = false;
             const audioResult = await generateSpeech(reflection.content, {
-              chunked: needsChunking
+              chunked: needsChunking,
+              onProgress: async (partialBase64, isComplete) => {
+                console.log(`[JournalApp] onProgress called: isComplete=${isComplete}, hasStartedPlaying=${hasStartedPlaying}, audioSize=${(partialBase64.length * 0.75 / 1024).toFixed(0)}KB`);
+                
+                if (isComplete && !hasStartedPlaying) {
+                  // Audio ready (either partial 200KB or complete) - try to play immediately
+                  console.log(`[JournalApp] Attempting to start playback with ${(partialBase64.length * 0.75 / 1024).toFixed(0)}KB of audio...`);
+                  hasStartedPlaying = true;
+                  const audioData = [partialBase64];
+                  setCurrentAudioBase64(audioData);
+                  
+                  // Clear loading state immediately so play button stops showing loading
+                  setIsGeneratingVoice(false);
+                  setGeneratingAudioId(null);
+                  
+                  try {
+                    // Start playing immediately
+                    await playAudio(audioData, 'main');
+                    console.log(`[JournalApp] ✅ Playback started successfully`);
+                  } catch (playError) {
+                    console.error('[JournalApp] Failed to start playback:', playError);
+                    // If playback fails (e.g., partial WAV can't decode), reset flag to try again when complete
+                    hasStartedPlaying = false;
+                    setIsGeneratingVoice(true);
+                    setGeneratingAudioId('main');
+                  }
+                  
+                  // Cache the audio (only if playback succeeded or if it's the final complete audio)
+                  if (hasStartedPlaying || isComplete) {
+                    await audioCache.set(reflection.content, partialBase64);
+                    
+                    // Save to database
+                    if (userId && !isDemoMode && currentHistoryId) {
+                      const audioToSave = partialBase64; // Already optimized as MP3 from server
+                      historyService.saveEntryAudio(currentHistoryId, audioToSave)
+                        .then(() => {
+                          console.log(`[JournalApp] ✅ Audio saved to database for entry ${currentHistoryId}`);
+                        })
+                        .catch(err => {
+                          console.warn('[JournalApp] Audio save failed:', err);
+                        });
+                    }
+                  }
+                } else if (!isComplete && !hasStartedPlaying) {
+                  // Partial data received but not enough to play yet
+                  console.log(`[JournalApp] Audio generation progress: ${(partialBase64.length * 0.75 / 1024).toFixed(0)}KB received, waiting for more...`);
+                }
+              }
             });
 
-            if (audioResult) {
+            if (audioResult && !hasStartedPlaying) {
+              // Fallback: if onProgress didn't trigger (shouldn't happen), use result
               const audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
               setCurrentAudioBase64(audioData);
 
@@ -1472,37 +1520,12 @@ const JournalApp: React.FC = () => {
 
                 // Automatically save to database when audio is first generated
                 if (userId && !isDemoMode && currentHistoryId) {
-                  optimizeAudio(audioResult)
-                    .then(optimized => {
-                      // Validate optimized audio before saving
-                      const MIN_VALID_AUDIO_LENGTH = 1000;
-                      const isValidOptimized = optimized &&
-                        typeof optimized === 'string' &&
-                        optimized.length >= MIN_VALID_AUDIO_LENGTH;
-
-                      const audioToSave = isValidOptimized ? optimized : audioResult;
-                      if (!isValidOptimized && optimized) {
-                        console.warn(`[JournalApp] Optimized audio invalid (length: ${optimized?.length}), using original`);
-                      }
-
-                      return historyService.saveEntryAudio(currentHistoryId, audioToSave);
-                    })
+                  historyService.saveEntryAudio(currentHistoryId, audioResult)
                     .then(() => {
                       console.log(`[JournalApp] ✅ Audio saved to database for entry ${currentHistoryId}`);
                     })
-                    .catch(err => {
-                      console.warn('[JournalApp] Audio optimization failed, saving original:', err);
-                      // Always save original audio even if optimization fails
-                      if (audioResult) {
-                        historyService.saveEntryAudio(currentHistoryId, audioResult)
-                          .then(() => {
-                            console.log(`[JournalApp] ✅ Original audio saved to database for entry ${currentHistoryId}`);
-                          })
-                          .catch(saveErr => {
-                            console.error('[JournalApp] Failed to save original audio to database:', saveErr);
-                            // Log error but don't throw - audio is cached locally
-                          });
-                      }
+                    .catch(saveErr => {
+                      console.error('[JournalApp] Failed to save audio to database:', saveErr);
                     });
                 }
               }
@@ -1510,8 +1533,11 @@ const JournalApp: React.FC = () => {
               // Audio is stored in IndexedDB, no need to store in history state
               // This avoids localStorage quota issues
 
-              playAudio(audioData, 'main');
-            } else {
+              // Only play if onProgress hasn't already started playback
+              if (!hasStartedPlaying) {
+                playAudio(audioData, 'main');
+              }
+            } else if (!hasStartedPlaying) {
               showToast('Could not generate audio. Please try again.', 'error');
             }
           }
@@ -1615,37 +1641,13 @@ const JournalApp: React.FC = () => {
 
           // Optimize and sync to database for cross-device access
           if (userId && !isDemoMode && historyEntry?.id) {
-            optimizeAudio(audioResult)
-              .then(optimized => {
-                // Validate optimized audio before saving
-                const MIN_VALID_AUDIO_LENGTH = 1000;
-                const isValidOptimized = optimized &&
-                  typeof optimized === 'string' &&
-                  optimized.length >= MIN_VALID_AUDIO_LENGTH;
-
-                const audioToSave = isValidOptimized ? optimized : audioResult;
-                if (!isValidOptimized && optimized) {
-                  console.warn(`[JournalApp] Optimized audio invalid (length: ${optimized?.length}), using original`);
-                }
-
-                return historyService.saveEntryAudio(historyEntry.id, audioToSave);
-              })
+            historyService.saveEntryAudio(historyEntry.id, audioResult)
               .then(() => {
                 console.log(`[JournalApp] ✅ Audio saved to database for entry ${historyEntry.id}`);
               })
-              .catch(err => {
-                console.warn('[JournalApp] Audio optimization failed, saving original:', err);
-                // Always save original audio even if optimization fails
-                if (audioResult) {
-                  historyService.saveEntryAudio(historyEntry.id, audioResult)
-                    .then(() => {
-                      console.log(`[JournalApp] ✅ Original audio saved to database for entry ${historyEntry.id}`);
-                    })
-                    .catch(saveErr => {
-                      console.error('[JournalApp] Failed to save original audio to database:', saveErr);
-                      // Log error but don't throw - audio is cached locally
-                    });
-                }
+              .catch(saveErr => {
+                console.error('[JournalApp] Failed to save audio to database:', saveErr);
+                // Log error but don't throw - audio is cached locally
               });
           }
         }

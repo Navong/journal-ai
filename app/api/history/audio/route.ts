@@ -149,15 +149,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Audio data must be a string' }, { status: 400 });
     }
 
-    // Remove any whitespace
-    const cleanedAudioData = audioData.replace(/\s/g, '');
+    // Remove any whitespace, newlines, and other non-base64 characters
+    let cleanedAudioData = audioData.replace(/[\s\n\r\t]/g, '');
+    
+    // Remove any non-base64 characters (keep only A-Z, a-z, 0-9, +, /, =)
+    // This is more lenient - removes invalid chars instead of rejecting
+    cleanedAudioData = cleanedAudioData.replace(/[^A-Za-z0-9+/=]/g, '');
 
-    // Validate base64 format
+    // Validate base64 format - check for valid base64 characters
+    // Base64 can have padding (=) only at the end, and should be valid base64 chars
     const base64Regex = /^[A-Za-z0-9+/]+=*$/;
     if (!base64Regex.test(cleanedAudioData)) {
+      // Find the first invalid character for debugging
+      const invalidCharIndex = cleanedAudioData.search(/[^A-Za-z0-9+/=]/);
+      const contextStart = Math.max(0, invalidCharIndex - 20);
+      const contextEnd = Math.min(cleanedAudioData.length, invalidCharIndex + 20);
+      
       console.error('[API] Invalid base64 format in audio data', {
         length: cleanedAudioData.length,
-        firstChars: cleanedAudioData.substring(0, 50)
+        originalLength: audioData.length,
+        firstChars: cleanedAudioData.substring(0, 50),
+        lastChars: cleanedAudioData.substring(Math.max(0, cleanedAudioData.length - 50)),
+        invalidCharIndex: invalidCharIndex !== -1 ? invalidCharIndex : 'not found',
+        context: invalidCharIndex !== -1 ? cleanedAudioData.substring(contextStart, contextEnd) : 'N/A',
+        hasWhitespace: /\s/.test(audioData),
+        hasNewlines: /\n/.test(audioData),
       });
       return NextResponse.json({ error: 'Audio data is not valid base64' }, { status: 400 });
     }

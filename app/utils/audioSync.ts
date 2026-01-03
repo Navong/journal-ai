@@ -3,7 +3,6 @@
 
 import { audioCache } from './audioCache';
 import { historyService } from '../services/historyService';
-import { optimizeAudio } from './audioOptimizer';
 import { hashText } from './textHash';
 
 export interface AudioSyncProgress {
@@ -226,9 +225,8 @@ export async function syncAudioToDatabase(
           }
 
           try {
-            // Optimize and save
-            const optimizedAudio = await optimizeAudio(audioEntry.audioBase64);
-            await historyService.saveEntryAudio(matchingEntry.id, optimizedAudio);
+            // Save directly
+            await historyService.saveEntryAudio(matchingEntry.id, audioEntry.audioBase64);
             console.log(`[audioSync] ✅ Synced audio for entry ${matchingEntry.id}`);
             return { type: 'saved' as const, entryId: matchingEntry.id };
           } catch (error: any) {

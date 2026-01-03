@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenAI, Modality } from '@google/genai';
+import { CartesiaClient } from '@cartesia/cartesia-js';
 import { auth } from '@/app/auth';
 
 // Rate limiting configuration
-const RATE_LIMIT_PER_MINUTE = 30; // Adjust based on your Gemini API tier
+const RATE_LIMIT_PER_MINUTE = 30; // Adjust based on your Cartesia API tier
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
 
 // Simple in-memory rate limiter (use Redis in production)
@@ -46,30 +46,19 @@ function cleanTextForTTS(text: string): string {
 }
 
 /**
- * Extracts and normalizes base64 audio data from Google GenAI inlineData
- * Handles both data URL format (data:audio/...;base64,...) and raw base64
+ * Converts ArrayBuffer to base64 string
+ * Used to convert Cartesia's binary audio response to base64 format
+ * for compatibility with existing frontend audio playback system
  */
-function extractBase64Audio(audioData: any): string {
-    if (typeof audioData !== 'string') {
-        throw new Error('Audio data must be a string');
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
     }
-
-    // Check if it's a data URL (data:audio/...;base64,...)
-    if (audioData.startsWith('data:')) {
-        const base64Index = audioData.indexOf('base64,');
-        if (base64Index !== -1) {
-            return audioData.substring(base64Index + 7); // Remove 'base64,' prefix
-        }
-        // If it's a data URL without base64 prefix, try to extract after comma
-        const commaIndex = audioData.indexOf(',');
-        if (commaIndex !== -1) {
-            return audioData.substring(commaIndex + 1);
-        }
-    }
-
-    // Already base64 (or should be) - return as-is
-    return audioData;
+    return btoa(binary);
 }
+
 
 export async function POST(request: NextRequest) {
     // Authenticate user
@@ -101,7 +90,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Text is required' }, { status: 400 });
         }
 
-        const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+        const apiKey = process.env.CARTESIA_API_KEY;
         if (!apiKey) {
             return NextResponse.json(
                 { error: 'TTS service not configured' },
@@ -109,8 +98,11 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const ai = new GoogleGenAI({ apiKey });
+        const client = new CartesiaClient({ apiKey });
         const cleanedContent = cleanTextForTTS(text);
+
+        // Get voice ID from environment or use default
+        const voiceId = process.env.CARTESIA_VOICE_ID || '694f9389-aac1-45b6-b726-9d9369183238';
 
         // Generate speech with retry logic for rate limits
         const maxRetries = 3;
@@ -118,67 +110,178 @@ export async function POST(request: NextRequest) {
 
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
-                const response = await ai.models.generateContent({
-                    model: 'gemini-2.5-flash-preview-tts',
-                    contents: [{ parts: [{ text: `Speak warmly and gently: ${cleanedContent}` }] }],
-                    config: {
-                        responseModalities: [Modality.AUDIO],
-                        speechConfig: {
-                            voiceConfig: {
-                                prebuiltVoiceConfig: { voiceName: 'Kore' },
-                            },
-                        },
+                const ttsStartTime = Date.now();
+                console.log(`[TTS API] Starting TTS generation (attempt ${attempt + 1}/${maxRetries})...`);
+
+                const response = await client.tts.bytes({
+                    modelId: 'sonic-2',
+                    transcript: cleanedContent,
+                    voice: {
+                        mode: 'id',
+                        id: voiceId,
+                    },
+                    language: 'en',
+                    outputFormat: {
+                        container: 'mp3',
+                        sampleRate: 24000, // Match existing audio format
+                        bit_rate: 64000, // 64 kbps for MP3 compression
                     },
                 });
 
-                const rawAudioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-                if (!rawAudioData) {
-                    throw new Error('No audio data in response');
-                }
+                const ttsResponseTime = Date.now() - ttsStartTime;
+                console.log(`[TTS API] TTS API response received in ${ttsResponseTime}ms`);
 
-                // Extract and normalize base64 audio data
-                // This handles both data URL format and raw base64
-                let audioData = extractBase64Audio(rawAudioData);
+                // Stream binary audio chunks directly to client (no base64 conversion)
+                const stream = new ReadableStream({
+                    async start(controller) {
+                        try {
+                            let streamReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+                            let totalBytes = 0;
+                            let chunkCount = 0;
+                            const streamStartTime = Date.now();
+                            let firstChunkTime: number | null = null;
 
-                // Remove any whitespace (base64 shouldn't have it, but some APIs add it)
-                audioData = audioData.replace(/\s/g, '');
+                            // Helper to get stream reader from Cartesia response
+                            const getStreamReader = (): ReadableStreamDefaultReader<Uint8Array> => {
+                                if (response instanceof ArrayBuffer || response instanceof Uint8Array) {
+                                    // Direct buffer - wrap in a simple stream
+                                    const buffer = response instanceof ArrayBuffer ? response : new Uint8Array(response).buffer;
+                                    const stream = new ReadableStream({
+                                        start(ctrl) {
+                                            ctrl.enqueue(new Uint8Array(buffer));
+                                            ctrl.close();
+                                        }
+                                    });
+                                    return stream.getReader();
+                                }
 
-                // Validate that it's valid base64
-                if (!audioData || audioData.length === 0) {
-                    console.error('[TTS API] Empty audio data after extraction', {
-                        rawType: typeof rawAudioData,
-                        rawLength: typeof rawAudioData === 'string' ? rawAudioData.length : 'N/A'
-                    });
-                    throw new Error('Empty audio data after extraction');
-                }
+                                if (response && typeof response === 'object') {
+                                    const streamResponse = response as any;
 
-                // Basic base64 validation (base64 chars only, with padding)
-                const base64Regex = /^[A-Za-z0-9+/]+=*$/;
-                if (!base64Regex.test(audioData)) {
-                    console.error('[TTS API] Invalid base64 format detected', {
-                        length: audioData.length,
-                        firstChars: audioData.substring(0, 100),
-                        lastChars: audioData.substring(audioData.length - 20),
-                        wasDataUrl: typeof rawAudioData === 'string' && rawAudioData.startsWith('data:')
-                    });
-                    throw new Error('Audio data is not in valid base64 format');
-                }
+                                    // Try different ways to get the reader
+                                    if (streamResponse.reader) {
+                                        return streamResponse.reader;
+                                    } else if (streamResponse.readableStream && !streamResponse.readableStream.locked) {
+                                        return streamResponse.readableStream.getReader();
+                                    } else if (streamResponse.source && typeof streamResponse.source[Symbol.asyncIterator] === 'function') {
+                                        // Convert async iterator to ReadableStream
+                                        const source = streamResponse.source;
+                                        const readableStream = new ReadableStream({
+                                            async start(ctrl) {
+                                                try {
+                                                    for await (const chunk of source) {
+                                                        ctrl.enqueue(chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk));
+                                                    }
+                                                    ctrl.close();
+                                                } catch (err) {
+                                                    ctrl.error(err);
+                                                }
+                                            }
+                                        });
+                                        return readableStream.getReader();
+                                    }
+                                }
 
-                console.log(`[TTS API] ✅ Successfully generated audio (${audioData.length} chars base64, ~${Math.round(audioData.length * 0.75 / 1024)}KB)`);
-                return NextResponse.json({ audioData });
+                                throw new Error('Unable to get stream reader from response');
+                            };
+
+                            streamReader = getStreamReader();
+                            console.log(`[TTS API] Stream reader obtained, starting to read chunks...`);
+
+                            // Read and stream binary chunks as they arrive
+                            while (true) {
+                                const chunkReceiveStart = Date.now();
+                                const { done, value } = await streamReader.read();
+                                const chunkReceiveTime = Date.now() - chunkReceiveStart;
+
+                                if (done) break;
+
+                                if (value) {
+                                    if (firstChunkTime === null) {
+                                        firstChunkTime = Date.now();
+                                        console.log(`[TTS API] First chunk received from Cartesia in ${firstChunkTime - streamStartTime}ms (${value.length} bytes, read took ${chunkReceiveTime}ms)`);
+                                    }
+
+                                    // Send binary chunk directly to client immediately
+                                    const sendStart = Date.now();
+                                    controller.enqueue(value);
+                                    const sendTime = Date.now() - sendStart;
+
+                                    if (chunkCount === 0) {
+                                        const firstChunkSentTime = Date.now();
+                                        console.log(`[TTS API] First chunk sent to client in ${firstChunkSentTime - streamStartTime}ms (enqueue took ${sendTime}ms)`);
+                                    }
+
+                                    totalBytes += value.length;
+                                    chunkCount++;
+
+                                    // Log every chunk for first 5 chunks, then every 10 or every 100KB
+                                    if (chunkCount <= 5 || chunkCount % 10 === 0 || totalBytes % (100 * 1024) < value.length) {
+                                        const elapsed = Date.now() - streamStartTime;
+                                        const rate = (totalBytes / 1024) / (elapsed / 1000);
+                                        console.log(`[TTS API] Chunk ${chunkCount}: ${value.length} bytes, total: ${(totalBytes / 1024).toFixed(0)}KB, rate: ${rate.toFixed(2)}KB/s (read: ${chunkReceiveTime}ms, send: ${sendTime}ms)`);
+                                    }
+                                }
+                            }
+
+                            controller.close();
+
+                            const totalTime = Date.now() - streamStartTime;
+                            console.log(`[TTS API] ✅ Streamed ${totalBytes} bytes to client in ${totalTime}ms (${chunkCount} chunks, ${(totalBytes / 1024 / (totalTime / 1000)).toFixed(2)}KB/s)`);
+
+                            // Release reader if needed
+                            if (streamReader && 'releaseLock' in streamReader) {
+                                streamReader.releaseLock();
+                            }
+                        } catch (error: any) {
+                            console.error('[TTS API] Stream error:', error);
+                            controller.error(error);
+                            throw error;
+                        }
+                    }
+                });
+
+                // Return streaming binary response
+                return new Response(stream, {
+                    headers: {
+                        'Content-Type': 'audio/mpeg', // MP3 audio format
+                        'Cache-Control': 'no-cache',
+                        'Connection': 'keep-alive',
+                        'Transfer-Encoding': 'chunked',
+                    },
+                });
             } catch (error: any) {
                 lastError = error;
 
-                // Check if it's a rate limit error
+                // Extract error information
                 const errorMessage = error?.message || '';
-                const errorStatus = error?.status || error?.code || '';
+                const errorStatus = error?.status || error?.statusCode || error?.code || '';
 
+                // Check for payment/quota errors (402, 403)
+                const isPaymentError =
+                    errorStatus === 402 ||
+                    errorStatus === 403 ||
+                    errorMessage.includes('402') ||
+                    errorMessage.includes('403') ||
+                    errorMessage.toLowerCase().includes('payment required') ||
+                    errorMessage.toLowerCase().includes('insufficient funds') ||
+                    errorMessage.toLowerCase().includes('quota exceeded');
+
+                // Check if it's a rate limit error
                 const isRateLimit =
                     errorStatus === 429 ||
                     errorMessage.includes('429') ||
                     errorMessage.includes('rate limit') ||
-                    errorMessage.includes('quota') ||
                     errorMessage.toLowerCase().includes('resource_exhausted');
+
+                // Payment/quota errors should not be retried
+                if (isPaymentError) {
+                    console.error('[TTS API] Payment/quota error:', {
+                        status: errorStatus,
+                        message: errorMessage,
+                    });
+                    throw new Error('TTS service payment/quota issue. Please check your Cartesia account.');
+                }
 
                 if (isRateLimit && attempt < maxRetries - 1) {
                     // Exponential backoff: 2^attempt seconds
@@ -199,16 +302,36 @@ export async function POST(request: NextRequest) {
     } catch (error: any) {
         console.error('[TTS API] Error:', error);
 
-        // Check if it's a rate limit error
+        // Extract error information
         const errorMessage = error?.message || '';
-        const errorStatus = error?.status || error?.code || '';
+        const errorStatus = error?.status || error?.statusCode || error?.code || '';
 
+        // Check for payment/quota errors (402, 403)
+        const isPaymentError =
+            errorStatus === 402 ||
+            errorStatus === 403 ||
+            errorMessage.includes('402') ||
+            errorMessage.includes('403') ||
+            errorMessage.toLowerCase().includes('payment required') ||
+            errorMessage.toLowerCase().includes('insufficient funds') ||
+            errorMessage.toLowerCase().includes('quota exceeded');
+
+        // Check if it's a rate limit error
         const isRateLimit =
             errorStatus === 429 ||
             errorMessage.includes('429') ||
             errorMessage.includes('rate limit') ||
-            errorMessage.includes('quota') ||
             errorMessage.toLowerCase().includes('resource_exhausted');
+
+        if (isPaymentError) {
+            return NextResponse.json(
+                {
+                    error: 'Payment required',
+                    message: 'TTS service requires payment or quota has been exceeded. Please check your Cartesia account.',
+                },
+                { status: 402 }
+            );
+        }
 
         if (isRateLimit) {
             return NextResponse.json(
