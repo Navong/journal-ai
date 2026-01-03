@@ -18,6 +18,7 @@ interface Navigator {
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Reflection, AppStatus, ViewMode, HistoryEntry, Mood, ChatMessage, AudioPlaybackState } from '../types';
 import { getJournalReflection, startJournalChat, generateSpeech } from '../services/geminiService';
+import { useStreamingReflection } from '../hooks/useStreamingReflection';
 import { ReflectionCard } from './ReflectionCard';
 import { HistoryView } from './HistoryView';
 import { ChatInterface } from './ChatInterface';
@@ -160,10 +161,29 @@ const JournalApp: React.FC = () => {
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
   const [autoPlayEnabled, setAutoPlayEnabled] = useState<boolean>(false); // Default to false until preferences load
   const [preferencesLoaded, setPreferencesLoaded] = useState(false); // Track if preferences have been loaded
+  const [streamingEnabled, setStreamingEnabled] = useState<boolean>(true); // Enable streaming by default
+
+  // Streaming reflection hook
+  const {
+    isStreaming,
+    streamedText,
+    reflection: streamedReflection,
+    summary: streamedSummary,
+    topic: streamedTopic,
+    mood: streamedMood,
+    entities: streamedEntities,
+    highlights: streamedHighlights,
+    error: streamingError,
+    startStreaming,
+    stopStreaming,
+    reset: resetStreaming,
+  } = useStreamingReflection();
 
   const [activeAudioId, setActiveAudioId] = useState<string | number | null>(null);
   const [generatingAudioId, setGeneratingAudioId] = useState<string | number | null>(null);
   const audioChunksRef = useRef<string[]>([]);
+  const streamingEntryRef = useRef<string>('');
+  const streamingCompletedRef = useRef<boolean>(false);
 
   // Audio sync state
   const [audioSyncProgress, setAudioSyncProgress] = useState<AudioSyncProgress | null>(null);
@@ -1782,13 +1802,31 @@ const JournalApp: React.FC = () => {
     chatSessionRef.current = null;
     setCurrentAudioBase64(null);
     stopCurrentAudio();
+    resetStreaming();
 
+    // Clear context revalidation indicator when new reflection is generated
+    if (contextRevalidated) {
+      setContextRevalidated(false);
+    }
+
+    // Generate a new ID for this entry
+    const newId = generateUUID();
+    setCurrentHistoryId(newId);
+
+    // Use streaming mode if enabled
+    if (streamingEnabled) {
+      console.log('[JournalApp] Starting streaming reflection generation');
+      
+      // Start streaming - this will update streamedText progressively
+      startStreaming(entry, history, selectedMood);
+      
+      // The rest of the processing will happen in the useEffect below
+      // that watches for streaming completion
+      return;
+    }
+
+    // Non-streaming path (fallback)
     try {
-      // Clear context revalidation indicator when new reflection is generated
-      if (contextRevalidated) {
-        setContextRevalidated(false);
-      }
-
       // Wrap with retry logic for iOS background suspension
       const { reflection: content, summary, topic, mood: detectedMood, entities, highlights } = await withRetry(
         'get-reflection',
@@ -1805,8 +1843,6 @@ const JournalApp: React.FC = () => {
         highlights // Include highlights in reflection state
       };
 
-      const newId = generateUUID();
-      setCurrentHistoryId(newId);
       setReflection(newReflection);
       setStatus(AppStatus.SUCCESS);
 
@@ -2009,7 +2045,141 @@ const JournalApp: React.FC = () => {
       setError(errorMessage);
       setStatus(AppStatus.ERROR);
     }
-  }, [entry, selectedMood, history]);
+  }, [entry, selectedMood, history, streamingEnabled, startStreaming, resetStreaming, contextRevalidated, stopCurrentAudio]);
+
+  // Handle streaming reflection state updates
+  useEffect(() => {
+    // Show streaming text while streaming
+    if (isStreaming && streamedText) {
+      setReflection({
+        content: streamedText,
+        summary: 'Generating...',
+        timestamp: new Date(),
+        topic: undefined,
+        highlights: []
+      });
+    }
+  }, [isStreaming, streamedText]);
+
+  // Handle streaming completion
+  useEffect(() => {
+    if (!isStreaming && streamedReflection && currentHistoryId && status === AppStatus.LOADING) {
+      console.log('[JournalApp] Streaming completed, creating history entry');
+      
+      const content = streamedReflection;
+      const summary = streamedSummary || 'A moment of reflection.';
+      const topic = streamedTopic;
+      const detectedMood = streamedMood || selectedMood;
+      const entities = streamedEntities;
+      const highlights = streamedHighlights;
+
+      // Update reflection with final data
+      const newReflection = {
+        content,
+        summary,
+        timestamp: new Date(),
+        topic,
+        highlights
+      };
+      setReflection(newReflection);
+      setStatus(AppStatus.SUCCESS);
+
+      // Create history entry
+      const newHistoryEntry: HistoryEntry = {
+        id: currentHistoryId,
+        text: entry,
+        summary,
+        reflection: content,
+        mood: detectedMood,
+        topic,
+        timestamp: new Date().toISOString(),
+        chatHistory: [],
+        entities,
+        highlights
+      };
+      console.log(`[JournalApp] Created streaming history entry with topic: "${topic}"`);
+
+      setHistory(prev => {
+        // Avoid duplicate entries
+        if (prev.some(h => h.id === currentHistoryId)) return prev;
+        return [newHistoryEntry, ...prev];
+      });
+
+      // Save entry to database
+      if (userId && !isDemoMode) {
+        setTimeout(() => {
+          if (isHydratedRef.current) {
+            console.log(`[JournalApp] Saving streaming entry ${currentHistoryId}`);
+            historyService.saveEntries([newHistoryEntry], false).catch(error => {
+              console.error('[JournalApp] Failed to save streaming entry:', error);
+            });
+          }
+        }, 100);
+      }
+
+      // Auto-generate audio if enabled
+      if (autoPlayEnabled && preferencesLoaded) {
+        console.log('[JournalApp] Auto-generating audio for streamed reflection');
+        setIsGeneratingVoice(true);
+        setGeneratingAudioId('main');
+
+        const generateAndPlayAudio = async () => {
+          try {
+            const cached = await audioCache.get(content);
+            let audioResult: string | null = null;
+
+            if (cached) {
+              audioResult = typeof cached === 'string' ? cached : cached[0];
+              const audioData = typeof cached === 'string' ? [cached] : cached;
+              setCurrentAudioBase64(audioData);
+            } else {
+              const needsChunking = content.length > 1500;
+              const generated = await generateSpeech(content, { chunked: needsChunking });
+
+              if (generated) {
+                audioResult = typeof generated === 'string' ? generated : generated[0];
+                const audioData = Array.isArray(generated) ? generated : [generated];
+                setCurrentAudioBase64(audioData);
+                if (typeof generated === 'string') {
+                  await audioCache.set(content, generated);
+                }
+              }
+            }
+
+            setIsGeneratingVoice(false);
+            setGeneratingAudioId(null);
+
+            // Play audio
+            if (audioResult) {
+              const audioDataToPlay = Array.isArray(audioResult) ? audioResult : [audioResult];
+              playAudio(audioDataToPlay, 'main');
+            }
+          } catch (error) {
+            console.error('[JournalApp] Failed to generate audio for streamed reflection:', error);
+            setIsGeneratingVoice(false);
+            setGeneratingAudioId(null);
+          }
+        };
+
+        generateAndPlayAudio();
+      }
+
+      // Scroll to bottom
+      setTimeout(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }, 100);
+    }
+  }, [isStreaming, streamedReflection, streamedSummary, streamedTopic, streamedMood, streamedEntities, streamedHighlights, currentHistoryId, status]);
+
+  // Handle streaming error
+  useEffect(() => {
+    if (streamingError && status === AppStatus.LOADING) {
+      console.error('[JournalApp] Streaming error:', streamingError);
+      setError(streamingError);
+      setStatus(AppStatus.ERROR);
+      showToast('Failed to generate reflection. Please try again.', 'error');
+    }
+  }, [streamingError, status]);
 
   const handleSendMessage = async (text: string) => {
     if (!chatSessionRef.current) {
@@ -2433,7 +2603,7 @@ const JournalApp: React.FC = () => {
               >
                 <span className="flex items-center justify-center gap-2 text-sm md:text-base">
                   {status === AppStatus.LOADING ? (
-                    <><svg className="animate-spin h-4 w-4 md:h-5 md:w-5 text-stone-300" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Reflecting...</>
+                    <><svg className="animate-spin h-4 w-4 md:h-5 md:w-5 text-stone-300" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> {isStreaming ? 'Streaming...' : 'Reflecting...'}</>
                   ) : (
                     <>Get Reflection <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 md:h-5 md:w-5 transition-transform group-hover:translate-x-1" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M12.293 5.293a1 1 0 011.414 0l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-2.293-2.293a1 1 0 010-1.414z" clipRule="evenodd" /></svg></>
                   )}
@@ -2553,6 +2723,20 @@ const JournalApp: React.FC = () => {
         </div>
         <div className="flex gap-6">
           <button className={`transition-colors ${viewMode === ViewMode.HISTORY ? 'text-emerald-700 font-bold' : 'hover:text-stone-600'}`} onClick={() => setViewMode(ViewMode.HISTORY)}>History</button>
+          <button
+            className="hover:text-stone-600 transition-colors flex items-center gap-1"
+            onClick={() => {
+              const newValue = !streamingEnabled;
+              setStreamingEnabled(newValue);
+              showToast(`Streaming ${newValue ? 'enabled' : 'disabled'}`, 'success');
+            }}
+            title={streamingEnabled ? 'Disable streaming (show text progressively)' : 'Enable streaming'}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 ${streamingEnabled ? 'text-emerald-600' : 'text-stone-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            <span>Stream</span>
+          </button>
           <button
             className="hover:text-stone-600 transition-colors flex items-center gap-1"
             onClick={() => {
