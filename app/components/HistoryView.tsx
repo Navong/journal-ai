@@ -99,7 +99,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         // Need to fetch more from server
         const fetchedHistory = await historyService.fetchHistory({
           limit: ITEMS_PER_PAGE,
-          offset: offset
+          offset: displayedHistory.length
         });
         
         if (fetchedHistory.length > 0) {
