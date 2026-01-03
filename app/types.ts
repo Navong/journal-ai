@@ -84,3 +84,19 @@ export interface ReflectionProgress {
 }
 
 export type ReflectionProgressCallback = (progress: ReflectionProgress) => void;
+
+// Token usage tracking for API cost transparency
+export interface TokenUsage {
+  promptTokens: number;      // Input tokens (including cached)
+  cachedTokens?: number;     // Tokens served from cache (cost savings)
+  completionTokens: number; // Output tokens
+  totalTokens: number;       // Total tokens (prompt + completion)
+}
+
+export interface CumulativeTokenUsage {
+  totalPromptTokens: number;
+  totalCachedTokens: number;
+  totalCompletionTokens: number;
+  totalTokens: number;
+  requestCount: number;
+}
