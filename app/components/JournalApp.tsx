@@ -17,7 +17,7 @@ interface Navigator {
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Reflection, AppStatus, ViewMode, HistoryEntry, Mood, ChatMessage, AudioPlaybackState } from '../types';
-import { getJournalReflection, startJournalChat, generateSpeech } from '../services/geminiService';
+import { getJournalReflection, startJournalChat, generateSpeech, buildChatContext } from '../services/geminiService';
 import { ReflectionCard } from './ReflectionCard';
 import { HistoryView } from './HistoryView';
 import { ChatInterface } from './ChatInterface';
@@ -178,6 +178,7 @@ const JournalApp: React.FC = () => {
   const [isChatting, setIsChatting] = useState(false);
   const chatSessionRef = useRef<Chat | null>(null);
   const [isSendingChat, setIsSendingChat] = useState(false);
+  const [streamingMessage, setStreamingMessage] = useState('');
   const [contextRevalidated, setContextRevalidated] = useState(false);
 
   const entryRef = useRef(entry);
@@ -2012,31 +2013,96 @@ const JournalApp: React.FC = () => {
   }, [entry, selectedMood, history]);
 
   const handleSendMessage = async (text: string) => {
-    if (!chatSessionRef.current) {
-      if (!reflection) return;
-      // Always use the latest history state to ensure deleted entries are excluded
-      chatSessionRef.current = await startJournalChat(entry, reflection.content, selectedMood, history, reflection.topic);
-      // Clear context revalidation indicator when session is recreated
-      if (contextRevalidated) {
-        setContextRevalidated(false);
-        showToast('Context refreshed with updated history', 'success');
-      }
+    if (!reflection) return;
+
+    // Clear context revalidation indicator if session is being created
+    if (contextRevalidated) {
+      setContextRevalidated(false);
+      showToast('Context refreshed with updated history', 'success');
     }
+
+    // Build context for streaming
+    const { context, systemInstruction } = await buildChatContext(
+      entry,
+      reflection.content,
+      selectedMood,
+      history,
+      reflection.topic
+    );
 
     const newUserMsg: ChatMessage = { role: 'user', text };
     const updatedMessagesWithUser = [...chatMessages, newUserMsg];
     setChatMessages(updatedMessagesWithUser);
     updateHistoryWithChat(updatedMessagesWithUser);
     setIsSendingChat(true);
+    setStreamingMessage('');
 
     try {
-      const response = await chatSessionRef.current!.sendMessage({ message: text });
-      const modelText = response.text || "I'm here listening, but I couldn't find the right words just now.";
+      // Call streaming API
+      const response = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: text,
+          context,
+          systemInstruction,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      // Process the stream
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+
+      if (!reader) {
+        throw new Error('No response body reader available');
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n').filter(line => line.startsWith('data: '));
+
+        for (const line of lines) {
+          try {
+            const data = JSON.parse(line.slice(6));
+
+            if (data.error) {
+              throw new Error(data.error);
+            }
+
+            if (data.done) {
+              // Stream complete
+              break;
+            }
+
+            if (data.text) {
+              fullText += data.text;
+              setStreamingMessage(fullText);
+            }
+          } catch (parseError) {
+            console.error('Error parsing SSE data:', parseError);
+          }
+        }
+      }
+
+      // Stream complete - add final message
+      const modelText = fullText || "I'm here listening, but I couldn't find the right words just now.";
       const newModelMsg: ChatMessage = { role: 'model', text: modelText };
 
       const updatedMessagesWithModel = [...updatedMessagesWithUser, newModelMsg];
       setChatMessages(updatedMessagesWithModel);
       updateHistoryWithChat(updatedMessagesWithModel);
+      setStreamingMessage('');
 
       // Only auto-generate audio for chat messages if auto-play is enabled
       if (autoPlayEnabled) {
@@ -2098,22 +2164,16 @@ const JournalApp: React.FC = () => {
     } catch (err: any) {
       console.error(err);
 
+      // Clear streaming message on error
+      setStreamingMessage('');
+
       // Parse API error to show user-friendly message
       let errorMessage = "I'm sorry, I lost my train of thought. Could you say that again?";
       let toastMessage = "I'm sorry, I couldn't respond right now. Please try again.";
 
-      if (err?.error?.code === 429 || err?.status === 429 || err?.error?.status === 'RESOURCE_EXHAUSTED') {
-        const retryDelay = err?.error?.details?.find((d: any) => d?.['@type']?.includes('RetryInfo'))?.retryDelay ||
-          err?.error?.message?.match(/retry in ([\d.]+)s/)?.[1];
-
-        if (retryDelay) {
-          const seconds = Math.ceil(parseFloat(retryDelay));
-          toastMessage = `Rate limit exceeded. Please wait ${seconds} seconds before trying again.`;
-          errorMessage = `I hit a rate limit. Please wait ${seconds} seconds and try again.`;
-        } else {
-          toastMessage = 'Rate limit exceeded. Please wait a moment and try again.';
-          errorMessage = 'I hit a rate limit. Please wait a moment and try again.';
-        }
+      if (err?.message?.includes('429') || err?.message?.includes('rate limit')) {
+        toastMessage = 'Rate limit exceeded. Please wait a moment and try again.';
+        errorMessage = 'I hit a rate limit. Please wait a moment and try again.';
         showToast(toastMessage, 'error');
       } else if (err?.message) {
         toastMessage = err.message;
@@ -2521,6 +2581,7 @@ const JournalApp: React.FC = () => {
                 contextRevalidated={contextRevalidated}
                 onSendMessage={handleSendMessage}
                 isSending={isSendingChat}
+                streamingMessage={streamingMessage}
                 onClose={() => setIsChatting(false)}
                 onTogglePlayback={handleToggleChatPlayback}
                 activeAudioId={activeAudioId}

@@ -13,6 +13,7 @@ interface ChatInterfaceProps {
   activeAudioId?: string | number | null;
   generatingAudioId?: string | number | null;
   contextRevalidated?: boolean;
+  streamingMessage?: string; // Currently streaming message text
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({
@@ -23,18 +24,19 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   onTogglePlayback,
   activeAudioId,
   generatingAudioId,
-  contextRevalidated = false
+  contextRevalidated = false,
+  streamingMessage = ''
 }) => {
   const [inputText, setInputText] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom on new messages or streaming
   useEffect(() => {
-    if (messages.length > 0 || isSending) {
+    if (messages.length > 0 || isSending || streamingMessage) {
       scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, isSending]);
+  }, [messages, isSending, streamingMessage]);
 
   // Handle escape key to close
   useEffect(() => {
@@ -187,7 +189,37 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             );
           })}
 
-          {isSending && (
+          {/* Show streaming message */}
+          {streamingMessage && (
+            <div className="flex flex-col items-start animate-in fade-in duration-500">
+              <div className="flex max-w-[95%] md:max-w-[85%] group flex-row items-end gap-2 md:gap-3">
+                <div className="flex-shrink-0 flex flex-col items-center gap-2 mb-2">
+                  <div className="w-8 h-8 md:w-9 md:h-9 rounded-full flex items-center justify-center bg-emerald-100 text-emerald-700">
+                    <span className="flex gap-0.5">
+                      <span className="w-0.5 h-2 bg-emerald-600 animate-[bounce_0.6s_infinite]"></span>
+                      <span className="w-0.5 h-3 bg-emerald-600 animate-[bounce_0.8s_infinite]"></span>
+                    </span>
+                  </div>
+                </div>
+
+                <div className="relative px-4 md:px-6 py-3 md:py-4 rounded-2xl md:rounded-3xl text-sm md:text-base leading-relaxed transition-all bg-[#F2F6F3] text-stone-800 border border-emerald-100/50 rounded-bl-none shadow-sm">
+                  <div className="prose prose-stone prose-sm font-serif text-stone-800 leading-relaxed" style={{ fontFamily: 'var(--font-lora), serif' }}>
+                    <ReactMarkdown>{streamingMessage}</ReactMarkdown>
+                  </div>
+                  <div className="absolute -bottom-4 md:-bottom-5 left-0 flex items-center gap-1.5 opacity-60">
+                    <span className="flex gap-0.5">
+                      <span className="w-0.5 h-1 md:h-1.5 bg-emerald-400 animate-[bounce_0.6s_infinite]"></span>
+                      <span className="w-0.5 h-1.5 md:h-2 bg-emerald-400 animate-[bounce_0.8s_infinite]"></span>
+                    </span>
+                    <span className="text-[8px] md:text-[9px] uppercase tracking-widest font-bold text-emerald-600">Streaming</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Show loading indicator when waiting for stream to start */}
+          {isSending && !streamingMessage && (
             <div className="flex justify-start animate-pulse">
               <div className="bg-[#F2F6F3] px-5 py-3 rounded-2xl md:rounded-3xl rounded-bl-none border border-emerald-100 flex items-center gap-2 md:gap-3 ml-10 md:ml-12 shadow-sm">
                 <div className="flex gap-1">

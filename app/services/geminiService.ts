@@ -939,7 +939,7 @@ ${historyContext}
 - Notice recurring patterns in entities
 - Show you remember details to build continuity
 
-**IMPORTANT:** 
+**IMPORTANT:**
 - Focus on the current conversation context above
 - Use entity context to be detail-oriented and helpful
 - Use past entries only when they directly relate to what the user is asking
@@ -948,6 +948,60 @@ ${historyContext}
       temperature: 0.7,
     },
   });
+};
+
+// Build context for streaming chat
+export const buildChatContext = async (
+  entry: string,
+  initialReflection: string,
+  mood: string,
+  history: HistoryEntry[],
+  currentTopic?: string
+): Promise<{ context: string; systemInstruction: string }> => {
+  // Build entity context for chat (last 3 entries)
+  const entityContext = buildEntityContext(history, 3);
+  const entityContextPrompt = formatEntityContextForPrompt(entityContext);
+
+  // Use improved context selection for chat (more focused, less tokens)
+  const historyContext = await selectRelevantContext(
+    entry,
+    mood as Mood,
+    currentTopic,
+    history,
+    MAX_CONTEXT_TOKENS_CHAT,
+    false // Don't include full reflections in chat context to save tokens
+  );
+
+  const context = `
+**Entity Context (Specific Details):**
+${entityContextPrompt}
+
+**Journal Entry:** ${entry}
+**Mood:** ${mood}
+**Your Initial Reflection:** ${initialReflection}
+
+**Relevant Past Context (labeled with relevance reasons):**
+${historyContext}
+
+**⚠️ REMEMBER THE CONTEXT CHECKLIST:**
+- Reference people by name when relevant
+- Acknowledge specific places mentioned
+- Be aware of upcoming events/deadlines
+- Notice recurring patterns in entities
+- Show you remember details to build continuity
+
+**IMPORTANT:**
+- Focus on the current conversation context above
+- Use entity context to be detail-oriented and helpful
+- Use past entries only when they directly relate to what the user is asking
+- Do not reference irrelevant past context - focus on answering the current question
+- Each past entry is labeled with why it's relevant - ignore entries that don't match the current discussion
+  `.trim();
+
+  return {
+    context,
+    systemInstruction: SYSTEM_INSTRUCTION
+  };
 };
 
 function cleanTextForTTS(text: string): string {
