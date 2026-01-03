@@ -58,7 +58,9 @@ export async function migrateAudioToDatabase(
 
     // Get all journal entries from database
     console.log('[audioMigration] Fetching journal entries from database...');
-    const journalEntries = await historyService.fetchHistory();
+    const historyResult = await historyService.fetchHistory();
+    // Handle both old format (array) and new format (object with entries)
+    const journalEntries = Array.isArray(historyResult) ? historyResult : historyResult.entries || [];
 
     if (journalEntries.length === 0) {
       console.log('[audioMigration] No journal entries found in database');
@@ -161,7 +163,9 @@ export async function getMigrationStats(): Promise<{
   entriesNeedingMigration: number;
 }> {
   const audioEntries = await audioCache.getAllEntries();
-  const journalEntries = await historyService.fetchHistory();
+  const historyResult = await historyService.fetchHistory();
+  // Handle both old format (array) and new format (object with entries)
+  const journalEntries = Array.isArray(historyResult) ? historyResult : historyResult.entries || [];
 
   const reflectionHashMap = new Map<string, string>();
   for (const entry of journalEntries) {

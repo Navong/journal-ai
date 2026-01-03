@@ -77,10 +77,21 @@ function fromHistoryEntry(entry: HistoryEntry, includeAudio = false) {
   return result;
 }
 
+export interface HistoryFetchResult {
+  entries: HistoryEntry[];
+  hasMore?: boolean;
+  pagination?: {
+    limit: number;
+    offset: number;
+    hasMore: boolean;
+  };
+}
+
 export const historyService = {
-  // Fetch all entries for current user (via API route)
+  // Fetch entries for current user (via API route)
   // By default, excludes audioData for faster queries (audio is large)
-  async fetchHistory(options?: { includeAudio?: boolean; limit?: number; offset?: number }): Promise<HistoryEntry[]> {
+  // Returns entries and pagination info if limit/offset are provided
+  async fetchHistory(options?: { includeAudio?: boolean; limit?: number; offset?: number }): Promise<HistoryEntry[] | HistoryFetchResult> {
     try {
       const params = new URLSearchParams();
       if (options?.includeAudio) {
@@ -104,15 +115,15 @@ export const historyService = {
           // Check if it's a timeout error
           if (errorText.includes('timeout') || errorText.includes('Connection terminated')) {
             log.warn('Database connection timeout - returning empty array', { errorText });
-            return [];
+            return options?.limit ? { entries: [], hasMore: false } : [];
           }
           // Database not configured or other error, return empty array
           log.warn('Database not configured or error occurred', { errorText });
-          return [];
+          return options?.limit ? { entries: [], hasMore: false } : [];
         }
         if (response.status === 401) {
           log.warn('Unauthorized - user not logged in');
-          return [];
+          return options?.limit ? { entries: [], hasMore: false } : [];
         }
         throw new Error(`Failed to fetch history: ${response.status}`);
       }
@@ -125,10 +136,21 @@ export const historyService = {
 
       const converted = entries.map(toHistoryEntry);
       log.info(`Successfully converted ${converted.length} entries`);
+      
+      // If pagination was requested, return result with pagination info
+      if (options?.limit && data.pagination) {
+        return {
+          entries: converted,
+          hasMore: data.pagination.hasMore,
+          pagination: data.pagination
+        };
+      }
+      
+      // Otherwise return just the entries array (backward compatibility)
       return converted;
     } catch (error) {
       log.error('Failed to fetch history', {}, error as Error);
-      return [];
+      return options?.limit ? { entries: [], hasMore: false } : [];
     }
   },
 

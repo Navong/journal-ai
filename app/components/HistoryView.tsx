@@ -73,7 +73,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     if (history.length > 0) {
       const initialItems = history.slice(0, ITEMS_PER_PAGE);
       setDisplayedHistory(initialItems);
-      setHasMore(history.length > ITEMS_PER_PAGE);
+      // If we have exactly ITEMS_PER_PAGE items, assume there might be more (pagination)
+      // This handles the case where initial load only fetches first page
+      setHasMore(history.length >= ITEMS_PER_PAGE);
       setCurrentPage(1);
     } else {
       setDisplayedHistory([]);
@@ -97,15 +99,23 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         setHasMore(offset < history.length);
       } else {
         // Need to fetch more from server
-        const fetchedHistory = await historyService.fetchHistory({
+        const fetchResult = await historyService.fetchHistory({
           limit: ITEMS_PER_PAGE,
-          offset: offset
+          offset: displayedHistory.length
         });
+        
+        // Handle both old format (array) and new format (object with entries)
+        const fetchedHistory = Array.isArray(fetchResult) 
+          ? fetchResult 
+          : fetchResult.entries || [];
+        const hasMoreData = Array.isArray(fetchResult)
+          ? fetchedHistory.length === ITEMS_PER_PAGE
+          : fetchResult.hasMore ?? (fetchedHistory.length === ITEMS_PER_PAGE);
         
         if (fetchedHistory.length > 0) {
           setDisplayedHistory([...displayedHistory, ...fetchedHistory]);
           setCurrentPage(nextPage);
-          setHasMore(fetchedHistory.length === ITEMS_PER_PAGE);
+          setHasMore(hasMoreData);
         } else {
           setHasMore(false);
         }
