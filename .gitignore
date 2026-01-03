@@ -34,3 +34,5 @@ dist
 /app/generated/prisma
 .vercel
 tsconfig.tsbuildinfo
+
+CLAUDE*

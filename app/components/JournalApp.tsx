@@ -334,8 +334,8 @@ const JournalApp: React.FC = () => {
               ]);
 
               // Handle both old format (array) and new format (object with entries)
-              const loadedHistory = Array.isArray(historyResult) 
-                ? historyResult 
+              const loadedHistory = Array.isArray(historyResult)
+                ? historyResult
                 : historyResult.entries || [];
 
               console.log(`[JournalApp] Received ${loadedHistory.length} entries and preferences:`, preferences);
@@ -408,7 +408,7 @@ const JournalApp: React.FC = () => {
               } else {
                 setHistory([]);
               }
-              
+
               // Load auto-play preference from localStorage as fallback
               const savedAutoPlay = localStorage.getItem(currentAutoPlayKey);
               if (savedAutoPlay !== null) {
@@ -458,7 +458,7 @@ const JournalApp: React.FC = () => {
     // Request wake lock when operations are active (including audio playback)
     const requestWakeLock = async () => {
       const shouldKeepAwake = status === AppStatus.LOADING || isGeneratingVoice || isAudioSyncing || isPlayingAudio;
-      
+
       if ('wakeLock' in navigator && shouldKeepAwake && !wakeLockRef.current) {
         try {
           const wakeLock = await (navigator as any).wakeLock.request('screen');
@@ -473,7 +473,7 @@ const JournalApp: React.FC = () => {
     // Release wake lock when operations complete
     const releaseWakeLock = async () => {
       const shouldKeepAwake = status === AppStatus.LOADING || isGeneratingVoice || isAudioSyncing || isPlayingAudio;
-      
+
       if (wakeLockRef.current && !shouldKeepAwake) {
         try {
           await wakeLockRef.current.release();
@@ -519,7 +519,7 @@ const JournalApp: React.FC = () => {
     const handleVisibilityChange = async () => {
       if (document.visibilityState === 'visible') {
         console.log('[JournalApp] App became visible, checking for pending operations');
-        
+
         // Resume AudioContext if audio is playing (handle both suspended and interrupted states)
         if (isPlayingAudio && audioContextRef.current) {
           const ctxState = audioContextRef.current.state as string;
@@ -533,7 +533,7 @@ const JournalApp: React.FC = () => {
             }
           }
         }
-        
+
         // Resume any pending operations
         for (const [operationId, resumeFn] of pendingOperationsRef.current.entries()) {
           console.log(`[JournalApp] Resuming operation: ${operationId}`);
@@ -560,7 +560,7 @@ const JournalApp: React.FC = () => {
         }
       } else if (document.visibilityState === 'hidden') {
         console.log('[JournalApp] App became hidden');
-        
+
         // Ensure AudioContext stays running for background audio playback (handle suspended and interrupted)
         if (isPlayingAudio && audioContextRef.current) {
           const ctxState = audioContextRef.current.state as string;
@@ -593,8 +593,8 @@ const JournalApp: React.FC = () => {
         historyService.fetchHistory({ limit: 5, offset: 0 })
           .then((historyResult) => {
             // Handle both old format (array) and new format (object with entries)
-            const loadedHistory = Array.isArray(historyResult) 
-              ? historyResult 
+            const loadedHistory = Array.isArray(historyResult)
+              ? historyResult
               : historyResult.entries || [];
             console.log(`[JournalApp] ✅ Refetched ${loadedHistory.length} entries for History view`);
             setHistory(loadedHistory);
@@ -685,7 +685,7 @@ const JournalApp: React.FC = () => {
         setIsAudioSyncing(false);
         setAudioSyncProgress(null);
         // Reset ref immediately to allow next scheduled sync
-          audioSyncRef.current = false;
+        audioSyncRef.current = false;
       }
     };
 
@@ -1039,7 +1039,7 @@ const JournalApp: React.FC = () => {
       if (ctx.state !== 'running') {
         // If still not running, provide helpful error message
         const currentState = ctx.state as string;
-        const stateMsg = currentState === 'interrupted' 
+        const stateMsg = currentState === 'interrupted'
           ? 'interrupted (may be due to phone call, notification, or other audio)'
           : currentState;
         const errorMsg = `AudioContext is ${stateMsg}. Audio playback requires user interaction. Please tap the play button again.`;
@@ -1113,9 +1113,9 @@ const JournalApp: React.FC = () => {
 
       return new Promise<void>((resolve) => {
         // Detect iOS device for special timing handling
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
-                     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-        
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
         // Track playback start time to ensure full duration plays
         // The onended event can fire 1-2 seconds early with compressed audio from database
         // iOS Safari has known issues with onended firing early consistently
@@ -1151,9 +1151,9 @@ const JournalApp: React.FC = () => {
             // Other platforms: 200ms buffer is usually sufficient
             safetyBuffer = 200;
           }
-          
+
           const waitTime = Math.max(0, remainingTime) + safetyBuffer;
-          
+
           // Use a dynamic cap: allow waiting up to 1.5x the expected duration, with a minimum of 30s
           // For iOS, we're more aggressive since we know onended fires early
           // Example: 20s audio -> cap at 30s, 40s audio -> cap at 60s, 60s audio -> cap at 90s
@@ -1212,7 +1212,7 @@ const JournalApp: React.FC = () => {
         setIsPlayingAudio(true);
         setIsPaused(false);
         setActiveAudioId(id);
-        
+
         // Note: Wake lock will be automatically requested via useEffect when isPlayingAudio becomes true
         // This ensures audio continues playing even when screen turns off on iOS
 
@@ -1229,7 +1229,7 @@ const JournalApp: React.FC = () => {
             // Store state after resume to avoid TypeScript type narrowing issues
             currentState = ctx.state as string;
             if (currentState !== 'running') {
-              const errorStateMsg = currentState === 'interrupted' 
+              const errorStateMsg = currentState === 'interrupted'
                 ? 'interrupted (may be due to phone call, notification, or other audio)'
                 : currentState;
               throw new Error(`AudioContext is ${errorStateMsg}, cannot start playback`);
@@ -1243,7 +1243,7 @@ const JournalApp: React.FC = () => {
               // iOS Safari sometimes needs a small delay after connecting audio graph
               // Wait a tiny bit to ensure audio graph is fully initialized
               await new Promise(resolve => setTimeout(resolve, 10));
-              
+
               // Update start time right when playback actually begins
               timingInfo.startTime = Date.now();
               source.start(0);
@@ -1466,15 +1466,15 @@ const JournalApp: React.FC = () => {
                     .then(optimized => {
                       // Validate optimized audio before saving
                       const MIN_VALID_AUDIO_LENGTH = 1000;
-                      const isValidOptimized = optimized && 
-                                               typeof optimized === 'string' && 
-                                               optimized.length >= MIN_VALID_AUDIO_LENGTH;
-                      
+                      const isValidOptimized = optimized &&
+                        typeof optimized === 'string' &&
+                        optimized.length >= MIN_VALID_AUDIO_LENGTH;
+
                       const audioToSave = isValidOptimized ? optimized : audioResult;
                       if (!isValidOptimized && optimized) {
                         console.warn(`[JournalApp] Optimized audio invalid (length: ${optimized?.length}), using original`);
                       }
-                      
+
                       return historyService.saveEntryAudio(currentHistoryId, audioToSave);
                     })
                     .then(() => {
@@ -1609,15 +1609,15 @@ const JournalApp: React.FC = () => {
               .then(optimized => {
                 // Validate optimized audio before saving
                 const MIN_VALID_AUDIO_LENGTH = 1000;
-                const isValidOptimized = optimized && 
-                                         typeof optimized === 'string' && 
-                                         optimized.length >= MIN_VALID_AUDIO_LENGTH;
-                
+                const isValidOptimized = optimized &&
+                  typeof optimized === 'string' &&
+                  optimized.length >= MIN_VALID_AUDIO_LENGTH;
+
                 const audioToSave = isValidOptimized ? optimized : audioResult;
                 if (!isValidOptimized && optimized) {
                   console.warn(`[JournalApp] Optimized audio invalid (length: ${optimized?.length}), using original`);
                 }
-                
+
                 return historyService.saveEntryAudio(historyEntry.id, audioToSave);
               })
               .then(() => {
@@ -1744,7 +1744,7 @@ const JournalApp: React.FC = () => {
     retryDelay = 1000
   ): Promise<T> => {
     ongoingOperationsRef.current.add(operationId);
-    
+
     const attemptOperation = async (attempt: number): Promise<T> => {
       try {
         const result = await operation();
@@ -1761,7 +1761,7 @@ const JournalApp: React.FC = () => {
 
         if (isSuspensionError && attempt < maxRetries) {
           console.log(`[JournalApp] Operation ${operationId} suspended, retrying (attempt ${attempt + 1}/${maxRetries})...`);
-          
+
           // Store operation for resume if app goes to background
           pendingOperationsRef.current.set(operationId, async () => {
             return attemptOperation(attempt + 1);
@@ -1771,7 +1771,7 @@ const JournalApp: React.FC = () => {
           await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
           return attemptOperation(attempt + 1);
         }
-        
+
         ongoingOperationsRef.current.delete(operationId);
         pendingOperationsRef.current.delete(operationId);
         throw error;
@@ -1807,6 +1807,7 @@ const JournalApp: React.FC = () => {
       const { reflection: content, summary, topic, mood: detectedMood, entities, highlights } = await withRetry(
         'get-reflection',
         () => getJournalReflection(entry, selectedMood, history, (progress) => {
+          console.log('[JournalApp] Progress update:', progress.stage, progress.message);
           setReflectionProgress(progress);
         }),
         3,
@@ -1936,32 +1937,32 @@ const JournalApp: React.FC = () => {
 
                 // Validate optimized audio before using it
                 const MIN_VALID_AUDIO_LENGTH = 1000;
-                const isValidOptimized = optimized && 
-                                         typeof optimized === 'string' && 
-                                         optimized.length >= MIN_VALID_AUDIO_LENGTH;
+                const isValidOptimized = optimized &&
+                  typeof optimized === 'string' &&
+                  optimized.length >= MIN_VALID_AUDIO_LENGTH;
 
                 // Save optimized version if valid, otherwise save original
                 const audioToSave = isValidOptimized ? optimized : audioResult;
                 if (!isValidOptimized && optimized) {
                   console.warn(`[JournalApp] Optimized audio invalid (length: ${optimized?.length}), using original`);
                 }
-                
+
                 historyService.saveEntryAudio(newId, audioToSave)
-                      .then(() => {
-                        console.log(`[JournalApp] ✅ Audio saved to database for entry ${newId}`);
-                      })
-                      .catch(err => {
+                  .then(() => {
+                    console.log(`[JournalApp] ✅ Audio saved to database for entry ${newId}`);
+                  })
+                  .catch(err => {
                     console.warn('[JournalApp] Failed to save audio to database:', err);
-                      });
+                  });
               }).catch(err => {
                 console.warn('[JournalApp] Error during audio sync setup, trying direct save:', err);
                 // Fallback: try saving original directly
-                    historyService.saveEntryAudio(newId, audioResult)
-                      .then(() => {
+                historyService.saveEntryAudio(newId, audioResult)
+                  .then(() => {
                     console.log(`[JournalApp] ✅ Audio saved to database (fallback) for entry ${newId}`);
-                      })
-                      .catch(() => { });
-                  });
+                  })
+                  .catch(() => { });
+              });
 
               // Note: We don't await - this runs in background so audio can play immediately
             }
@@ -1977,10 +1978,10 @@ const JournalApp: React.FC = () => {
             console.error('Auto TTS generation error:', error);
             showToast('Error generating speech automatically.', 'error');
           } finally {
-          setIsGeneratingVoice(false);
-          setGeneratingAudioId(null);
-        }
-      })();
+            setIsGeneratingVoice(false);
+            setGeneratingAudioId(null);
+          }
+        })();
       } else {
         console.log('[JournalApp] Skipping audio generation - auto-play is disabled');
       }
@@ -2227,7 +2228,7 @@ const JournalApp: React.FC = () => {
       // Authenticated: clear from Supabase
       try {
         await historyService.deleteAllEntries();
-        
+
         // IMPORTANT: Also clear localStorage to prevent migration logic from re-importing old data
         // The migration logic (lines 331-338) checks if DB is empty and localStorage has data,
         // and automatically migrates localStorage → DB. This would undo the clear!
@@ -2241,8 +2242,8 @@ const JournalApp: React.FC = () => {
         // Try to reload history on error (only first page)
         try {
           const historyResult = await historyService.fetchHistory({ limit: 5, offset: 0 });
-          const loadedHistory = Array.isArray(historyResult) 
-            ? historyResult 
+          const loadedHistory = Array.isArray(historyResult)
+            ? historyResult
             : historyResult.entries || [];
           setHistory(loadedHistory);
         } catch (e) {
@@ -2348,11 +2349,10 @@ const JournalApp: React.FC = () => {
               </span>
             )}
             {/* DEBUG: Show auto-play status */}
-            <span className={`flex items-center gap-1.5 text-[9px] md:text-[10px] px-2 py-0.5 md:py-1 rounded-full uppercase tracking-widest font-bold border ${
-              autoPlayEnabled 
-                ? 'text-emerald-600 bg-emerald-50 border-emerald-100' 
-                : 'text-stone-400 bg-stone-50 border-stone-200'
-            }`}>
+            <span className={`flex items-center gap-1.5 text-[9px] md:text-[10px] px-2 py-0.5 md:py-1 rounded-full uppercase tracking-widest font-bold border ${autoPlayEnabled
+              ? 'text-emerald-600 bg-emerald-50 border-emerald-100'
+              : 'text-stone-400 bg-stone-50 border-stone-200'
+              }`}>
               Auto-play: {autoPlayEnabled ? 'ON' : 'OFF'}
             </span>
           </div>
@@ -2444,26 +2444,74 @@ const JournalApp: React.FC = () => {
             <div className="sticky bottom-0 md:bottom-8 py-3 md:py-6 pt-4 pb-safe bg-gradient-to-t from-[#FDFCF8] via-[#FDFCF8] to-transparent flex flex-col md:flex-row gap-3 md:gap-4 z-10">
               <button
                 onClick={handleGetReflection}
-                disabled={isButtonDisabled}
+                disabled={isButtonDisabled && status !== AppStatus.LOADING}
                 className={`
                   group relative flex-grow md:flex-initial px-6 md:px-10 py-3.5 md:py-4 rounded-full font-medium transition-all duration-300 active:scale-95 touch-manipulation min-h-[48px] md:min-h-0
-                  ${isButtonDisabled
-                    ? 'bg-stone-100 text-stone-300 cursor-not-allowed opacity-50'
-                    : 'bg-emerald-800 text-emerald-50 hover:bg-emerald-900 shadow-md hover:shadow-lg'}
+                  ${status === AppStatus.LOADING
+                    ? '!bg-emerald-900 md:!bg-emerald-800 !text-white md:!text-emerald-50 border-2 border-emerald-800 md:border-0 shadow-lg md:shadow-md cursor-wait'
+                    : isButtonDisabled
+                      ? 'bg-stone-100 text-stone-300 cursor-not-allowed opacity-50'
+                      : '!bg-emerald-900 md:!bg-emerald-800 !text-white md:!text-emerald-50 border-2 border-emerald-800 md:border-0 hover:bg-emerald-950 md:hover:bg-emerald-900 shadow-lg md:shadow-md hover:shadow-xl md:hover:shadow-lg'}
                 `}
+                style={status === AppStatus.LOADING ? { backgroundColor: '#064e3b', color: '#ffffff' } : !isButtonDisabled ? { backgroundColor: '#064e3b' } : undefined}
               >
-                <span className="flex items-center justify-center gap-2 text-sm md:text-base">
+                <span className={`flex items-center justify-center gap-2 text-sm md:text-base ${status === AppStatus.LOADING ? '!text-white' : ''}`} style={status === AppStatus.LOADING ? { color: '#ffffff' } : undefined}>
                   {status === AppStatus.LOADING ? (
-                    <><svg className="animate-spin h-4 w-4 md:h-5 md:w-5 text-stone-300" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Reflecting...</>
+                    <>
+                      {/* Mobile: Show detailed progress stage */}
+                      <div className="md:hidden flex items-center gap-2">
+                        {!reflectionProgress ? (
+                          <svg className="animate-spin h-4 w-4 !text-white" viewBox="0 0 24 24" style={{ color: '#ffffff' }}>
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                        ) : reflectionProgress.stage === 'extracting_entities' ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 !text-white animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#ffffff' }}>
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                          </svg>
+                        ) : reflectionProgress.stage === 'detecting_mood' ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 !text-white animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#ffffff' }}>
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        ) : reflectionProgress.stage === 'detecting_topic' ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 !text-white animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#ffffff' }}>
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                          </svg>
+                        ) : reflectionProgress.stage === 'building_context' ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 !text-white animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#ffffff' }}>
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                        ) : reflectionProgress.stage === 'generating_reflection' ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 !text-white animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#ffffff' }}>
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                          </svg>
+                        ) : (
+                          <svg className="animate-spin h-4 w-4 !text-white" viewBox="0 0 24 24" style={{ color: '#ffffff' }}>
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                        )}
+                        <span className="!text-white font-semibold" style={{ color: '#ffffff' }}>{reflectionProgress?.message || 'Reflecting...'}</span>
+                      </div>
+
+                      {/* Desktop: Simple spinner */}
+                      <div className="hidden md:flex items-center gap-2">
+                        <svg className="animate-spin h-5 w-5 text-stone-300" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>Reflecting...</span>
+                      </div>
+                    </>
                   ) : (
                     <>Get Reflection <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 md:h-5 md:w-5 transition-transform group-hover:translate-x-1" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M12.293 5.293a1 1 0 011.414 0l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-2.293-2.293a1 1 0 010-1.414z" clipRule="evenodd" /></svg></>
                   )}
                 </span>
               </button>
 
-              {/* AI Progress Indicator */}
+              {/* AI Progress Indicator - Desktop Only */}
               {reflectionProgress && status === AppStatus.LOADING && (
-                <div className="flex items-center gap-2 md:gap-3 px-4 md:px-6 py-2 md:py-3 bg-emerald-50/50 border border-emerald-100 rounded-full animate-in fade-in duration-300">
+                <div className="hidden md:flex items-center gap-2 md:gap-3 px-4 md:px-6 py-2 md:py-3 bg-emerald-50/50 border border-emerald-100 rounded-full animate-in fade-in duration-300">
                   {/* Animated Icon */}
                   {reflectionProgress.stage === 'extracting_entities' && (
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 md:h-4 md:w-4 text-emerald-600 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2486,7 +2534,7 @@ const JournalApp: React.FC = () => {
                     </svg>
                   )}
                   {reflectionProgress.stage === 'generating_reflection' && (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 md:h-4 md:w-4 text-emerald-600 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 md:h-4 md:w-4 text-emerald-600 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
                     </svg>
                   )}

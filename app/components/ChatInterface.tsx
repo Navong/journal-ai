@@ -76,7 +76,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             <div className="flex-1">
               <h3 className="text-[10px] md:text-xs font-bold text-stone-400 uppercase tracking-widest">Conversation</h3>
               <div className="flex items-center gap-2 mt-0.5">
-              <p className="text-[9px] md:text-[10px] text-emerald-600 font-medium tracking-wide uppercase">Refining Insights</p>
+                <p className="text-[9px] md:text-[10px] text-emerald-700 md:text-emerald-600 bg-emerald-50 md:bg-transparent px-2 py-0.5 md:px-0 md:py-0 rounded-full md:rounded-none font-medium tracking-wide uppercase border border-emerald-100 md:border-0">Refining Insights</p>
                 {contextRevalidated && (
                   <span className="flex items-center gap-1 text-[8px] md:text-[9px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full uppercase tracking-widest font-bold border border-emerald-100 animate-pulse">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -189,13 +189,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
           {isSending && (
             <div className="flex justify-start animate-pulse">
-              <div className="bg-[#F2F6F3] px-5 py-3 rounded-2xl md:rounded-3xl rounded-bl-none border border-emerald-100 flex items-center gap-2 md:gap-3 ml-10 md:ml-12 shadow-sm">
+              <div className="bg-emerald-50 md:bg-[#F2F6F3] px-5 py-3 rounded-2xl md:rounded-3xl rounded-bl-none border-2 md:border border-emerald-200 md:border-emerald-100 flex items-center gap-2 md:gap-3 ml-10 md:ml-12 shadow-md md:shadow-sm">
                 <div className="flex gap-1">
-                  <span className="w-1 md:w-1.5 h-1 md:h-1.5 bg-emerald-300 rounded-full animate-bounce"></span>
-                  <span className="w-1 md:w-1.5 h-1 md:h-1.5 bg-emerald-300 rounded-full animate-bounce [animation-delay:0.2s]"></span>
-                  <span className="w-1 md:w-1.5 h-1 md:h-1.5 bg-emerald-300 rounded-full animate-bounce [animation-delay:0.4s]"></span>
+                  <span className="w-1 md:w-1.5 h-1 md:h-1.5 bg-emerald-600 md:bg-emerald-300 rounded-full animate-bounce"></span>
+                  <span className="w-1 md:w-1.5 h-1 md:h-1.5 bg-emerald-600 md:bg-emerald-300 rounded-full animate-bounce [animation-delay:0.2s]"></span>
+                  <span className="w-1 md:w-1.5 h-1 md:h-1.5 bg-emerald-600 md:bg-emerald-300 rounded-full animate-bounce [animation-delay:0.4s]"></span>
                 </div>
-                <span className="text-[9px] md:text-[10px] text-emerald-400 font-medium uppercase tracking-widest">Serenity is reflecting</span>
+                <span className="text-[9px] md:text-[10px] text-emerald-700 md:text-emerald-400 font-medium uppercase tracking-widest">Serenity is reflecting</span>
               </div>
             </div>
           )}
