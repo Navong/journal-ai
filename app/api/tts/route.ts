@@ -45,21 +45,6 @@ function cleanTextForTTS(text: string): string {
         .trim();
 }
 
-/**
- * Converts ArrayBuffer to base64 string
- * Used to convert Cartesia's binary audio response to base64 format
- * for compatibility with existing frontend audio playback system
- */
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer);
-    let binary = '';
-    for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-}
-
-
 export async function POST(request: NextRequest) {
     // Authenticate user
     const session = await auth();
@@ -113,6 +98,13 @@ export async function POST(request: NextRequest) {
                 const ttsStartTime = Date.now();
                 console.log(`[TTS API] Starting TTS generation (attempt ${attempt + 1}/${maxRetries})...`);
 
+                const outputFormat = {
+                    container: 'wav' as const,
+                    encoding: 'pcm_f32le' as const, // PCM float32 little-endian - allows progressive decoding
+                    sampleRate: 44100, // CD quality - matches Cartesia docs recommendation
+                };
+                console.log('[TTS API] Using output format:', outputFormat);
+
                 const response = await client.tts.bytes({
                     modelId: 'sonic-2',
                     transcript: cleanedContent,
@@ -121,11 +113,8 @@ export async function POST(request: NextRequest) {
                         id: voiceId,
                     },
                     language: 'en',
-                    outputFormat: {
-                        container: 'mp3',
-                        sampleRate: 24000, // Match existing audio format
-                        bit_rate: 64000, // 64 kbps for MP3 compression
-                    },
+                    outputFormat,
+                    speed: 'slow', // Slower pace for more natural, relaxed listening
                 });
 
                 const ttsResponseTime = Date.now() - ttsStartTime;
@@ -244,7 +233,7 @@ export async function POST(request: NextRequest) {
                 // Return streaming binary response
                 return new Response(stream, {
                     headers: {
-                        'Content-Type': 'audio/mpeg', // MP3 audio format
+                        'Content-Type': 'audio/wav', // WAV audio format
                         'Cache-Control': 'no-cache',
                         'Connection': 'keep-alive',
                         'Transfer-Encoding': 'chunked',

@@ -17,7 +17,7 @@ interface Navigator {
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Reflection, AppStatus, ViewMode, HistoryEntry, Mood, ChatMessage, AudioPlaybackState, ReflectionProgress, TokenUsage, CumulativeTokenUsage } from '../types';
-import { getJournalReflection, startJournalChat, generateSpeech } from '../services/geminiService';
+import { getJournalReflection, startJournalChat, generateSpeech, generateSpeechStream } from '../services/geminiService';
 import { ReflectionCard } from './ReflectionCard';
 import { HistoryView } from './HistoryView';
 import { ChatInterface } from './ChatInterface';
@@ -28,7 +28,9 @@ import { generateUUID } from '../utils/uuid';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { useSession, signOut } from 'next-auth/react';
 import { historyService } from '../services/historyService';
+import { optimizeAudio } from '../utils/audioOptimization';
 import { syncAudioToDatabase, getSyncStats, shouldRunSync, getSyncState, AudioSyncProgress, SYNC_INTERVAL } from '../utils/audioSync';
+import { createProgressiveAudioPlayer } from '../utils/audioStreaming';
 
 // Generate user-scoped keys to prevent data leakage between users
 const getHistoryKey = (userId: string | null, isDemo: boolean) => {
@@ -64,53 +66,6 @@ function decodeBase64(base64: string) {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes;
-}
-
-async function decodeAudioData(
-  data: Uint8Array,
-  ctx: AudioContext,
-  sampleRate: number = 24000,
-  numChannels: number = 1,
-): Promise<AudioBuffer> {
-  // Int16Array requires buffer length to be a multiple of 2 (16 bits = 2 bytes per sample)
-  // Ensure we have an even number of bytes
-  const dataLength = data.length;
-  const alignedLength = Math.floor(dataLength / 2) * 2; // Round down to even number
-
-  if (alignedLength === 0) {
-    throw new Error('Audio data is too short');
-  }
-
-  // Create a properly aligned buffer - use byte offset and length from the original buffer
-  // Or create a new Uint8Array with only the aligned portion
-  let alignedData: Uint8Array;
-  if (alignedLength === dataLength) {
-    // Already aligned, use the buffer directly
-    alignedData = data;
-  } else {
-    // Trim to even length
-    alignedData = data.slice(0, alignedLength);
-    console.warn(`[decodeAudioData] Trimmed ${dataLength - alignedLength} byte(s) to align buffer`);
-  }
-
-  // Create Int16Array with the aligned buffer
-  // Use byteOffset and byteLength to ensure proper alignment
-  const dataInt16 = new Int16Array(alignedData.buffer, alignedData.byteOffset, alignedLength / 2);
-  const frameCount = dataInt16.length / numChannels;
-
-  if (frameCount === 0) {
-    throw new Error('No audio frames found after alignment');
-  }
-
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-
-  for (let channel = 0; channel < numChannels; channel++) {
-    const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-    }
-  }
-  return buffer;
 }
 
 const JournalApp: React.FC = () => {
@@ -1061,53 +1016,18 @@ const JournalApp: React.FC = () => {
 
       let buffer: AudioBuffer;
 
-      // Check if audio is compressed (from database) or raw PCM (from cache)
-      const isCompressed = isCompressedAudio(base64Audio);
-      console.log(`[playAudioChunk] Audio format detected: ${isCompressed ? 'compressed' : 'raw PCM'}, length: ${base64Audio.length}`);
-
-      if (isCompressed) {
-        // Compressed audio: decode using AudioContext.decodeAudioData
-        try {
-          const audioBytes = decodeBase64(base64Audio);
-          const mimeType = getAudioMimeType(base64Audio);
-          console.log(`[playAudioChunk] Decoding compressed audio as ${mimeType}`);
-          const audioBlob = new Blob([audioBytes], { type: mimeType });
-          const arrayBuffer = await audioBlob.arrayBuffer();
-          buffer = await ctx.decodeAudioData(arrayBuffer);
-          console.log(`[playAudioChunk] Successfully decoded compressed audio: ${buffer.duration.toFixed(2)}s, ${buffer.sampleRate}Hz`);
-        } catch (decodeError) {
-          console.error('[playAudioChunk] Failed to decode compressed audio, trying PCM fallback:', decodeError);
-          // Fallback to PCM decoding if compressed decode fails
-          try {
-            const audioBytes = decodeBase64(base64Audio);
-            buffer = await decodeAudioData(audioBytes, ctx);
-            console.log(`[playAudioChunk] Successfully decoded as PCM fallback: ${buffer.duration.toFixed(2)}s`);
-          } catch (pcmError) {
-            console.error('[playAudioChunk] Both compressed and PCM decoding failed:', pcmError);
-            throw new Error('Failed to decode audio in any format');
-          }
-        }
-      } else {
-        // Raw PCM: use existing decoder
-        try {
-          const audioBytes = decodeBase64(base64Audio);
-          buffer = await decodeAudioData(audioBytes, ctx);
-          console.log(`[playAudioChunk] Successfully decoded PCM audio: ${buffer.duration.toFixed(2)}s, ${buffer.sampleRate}Hz`);
-        } catch (pcmError) {
-          console.error('[playAudioChunk] Failed to decode PCM audio:', pcmError);
-          // Try as compressed audio as fallback
-          try {
-            console.log('[playAudioChunk] Trying compressed audio fallback...');
-            const audioBytes = decodeBase64(base64Audio);
-            const audioBlob = new Blob([audioBytes], { type: 'audio/webm' });
-            const arrayBuffer = await audioBlob.arrayBuffer();
-            buffer = await ctx.decodeAudioData(arrayBuffer);
-            console.log(`[playAudioChunk] Successfully decoded as compressed fallback: ${buffer.duration.toFixed(2)}s`);
-          } catch (compressedError) {
-            console.error('[playAudioChunk] Both PCM and compressed decoding failed:', compressedError);
-            throw new Error('Failed to decode audio in any format');
-          }
-        }
+      // Always decode with native decoder as we now get compressed audio (MP3)
+      try {
+        const audioBytes = decodeBase64(base64Audio);
+        const mimeType = getAudioMimeType(base64Audio);
+        console.log(`[playAudioChunk] Decoding compressed audio as ${mimeType}`);
+        const audioBlob = new Blob([audioBytes], { type: mimeType });
+        const arrayBuffer = await audioBlob.arrayBuffer();
+        buffer = await ctx.decodeAudioData(arrayBuffer);
+        console.log(`[playAudioChunk] Successfully decoded compressed audio: ${buffer.duration.toFixed(2)}s, ${buffer.sampleRate}Hz`);
+      } catch (decodeError) {
+        console.error('[playAudioChunk] Failed to decode compressed audio:', decodeError);
+        throw new Error('Failed to decode audio');
       }
 
       const source = ctx.createBufferSource();
@@ -1288,12 +1208,46 @@ const JournalApp: React.FC = () => {
   };
 
   const playAudio = async (
-    audioData: string | string[],
+    audioData: string | string[] | ReadableStream<Uint8Array>,
     id: string | number = 'main'
   ) => {
     stopCurrentAudio();
 
-    const chunks = Array.isArray(audioData) ? audioData : [audioData];
+    // Handle streaming audio (ReadableStream) - PRIMARY METHOD
+    if (audioData instanceof ReadableStream) {
+      try {
+        const player = await createProgressiveAudioPlayer();
+
+        // Update state immediately - playback will start in 2-3 seconds
+        setIsPlayingAudio(true);
+        setIsPaused(false);
+        setActiveAudioId(id);
+
+        // Start playback asynchronously (don't await - let it run in background)
+        player.play(audioData).then(() => {
+          // Playback completed successfully
+          console.log('[playAudio] Streaming playback completed');
+          setIsPlayingAudio(false);
+          setIsPaused(false);
+          setActiveAudioId(null);
+        }).catch((error) => {
+          console.error('Error during streaming playback:', error);
+          showToast('Error playing audio', 'error');
+          setIsPlayingAudio(false);
+          setIsPaused(false);
+          setActiveAudioId(null);
+        });
+      } catch (error) {
+        console.error('Error initializing streaming audio:', error);
+        showToast('Error playing audio', 'error');
+        setIsPlayingAudio(false);
+        setActiveAudioId(null);
+      }
+      return;
+    }
+
+    // Handle base64 audio (for backward compatibility only)
+    const chunks = Array.isArray(audioData) ? audioData : [audioData as string];
 
     if (chunks.length === 0 || chunks.some(chunk => !chunk || chunk.trim() === '')) {
       console.error('Invalid audio data:', chunks);
@@ -1423,19 +1377,30 @@ const JournalApp: React.FC = () => {
   };
 
   const handleTogglePlayback = async () => {
+    console.log('[handleTogglePlayback] Called', {
+      isPlayingAudio,
+      activeAudioId,
+      isPaused,
+      hasReflection: !!reflection,
+      hasCurrentAudioBase64: !!currentAudioBase64
+    });
+
     // Ensure AudioContext is created/resumed on user interaction (required for mobile)
     ensureAudioContext();
 
     if (isPlayingAudio && activeAudioId === 'main') {
+      console.log('[handleTogglePlayback] Path: Toggle pause/resume');
       if (isPaused) {
         resumeCurrentAudio();
       } else {
         pauseCurrentAudio();
       }
     } else if (isPaused && activeAudioId === 'main') {
+      console.log('[handleTogglePlayback] Path: Resume from pause');
       resumeCurrentAudio();
     } else {
       if (currentAudioBase64 && (activeAudioId !== 'main' || !isPlayingAudio)) {
+        console.log('[handleTogglePlayback] Path: Play existing currentAudioBase64');
         const audioData = typeof currentAudioBase64 === 'string'
           ? currentAudioBase64
           : Array.isArray(currentAudioBase64)
@@ -1443,102 +1408,70 @@ const JournalApp: React.FC = () => {
             : [currentAudioBase64];
         playAudio(audioData, 'main');
       } else if (reflection) {
+        console.log('[handleTogglePlayback] Path: Generate new audio for reflection');
         setIsGeneratingVoice(true);
         setGeneratingAudioId('main');
         try {
           // Check cache first
+          console.log('[handleTogglePlayback] Checking IndexedDB cache...');
           const cached = await audioCache.get(reflection.content);
+          console.log('[handleTogglePlayback] Cache result:', cached ? `found (${typeof cached})` : 'not found');
           if (cached) {
             const audioData = typeof cached === 'string' ? cached : [cached];
             setCurrentAudioBase64(audioData);
             playAudio(audioData, 'main');
           } else {
-            // Generate with chunking for long texts
-            const textLength = reflection.content.length;
-            const needsChunking = textLength > 1500;
+            // Use direct streaming for immediate playback (like test page)
+            console.log('[JournalApp] Generating streaming audio for reflection...');
+            const streamStartTime = Date.now();
+            const audioStream = await generateSpeechStream(reflection.content);
 
-            let hasStartedPlaying = false;
-            const audioResult = await generateSpeech(reflection.content, {
-              chunked: needsChunking,
-              onProgress: async (partialBase64, isComplete) => {
-                console.log(`[JournalApp] onProgress called: isComplete=${isComplete}, hasStartedPlaying=${hasStartedPlaying}, audioSize=${(partialBase64.length * 0.75 / 1024).toFixed(0)}KB`);
-                
-                if (isComplete && !hasStartedPlaying) {
-                  // Audio ready (either partial 200KB or complete) - try to play immediately
-                  console.log(`[JournalApp] Attempting to start playback with ${(partialBase64.length * 0.75 / 1024).toFixed(0)}KB of audio...`);
-                  hasStartedPlaying = true;
-                  const audioData = [partialBase64];
-                  setCurrentAudioBase64(audioData);
-                  
-                  // Clear loading state immediately so play button stops showing loading
-                  setIsGeneratingVoice(false);
-                  setGeneratingAudioId(null);
-                  
-                  try {
-                    // Start playing immediately
-                    await playAudio(audioData, 'main');
-                    console.log(`[JournalApp] ✅ Playback started successfully`);
-                  } catch (playError) {
-                    console.error('[JournalApp] Failed to start playback:', playError);
-                    // If playback fails (e.g., partial WAV can't decode), reset flag to try again when complete
-                    hasStartedPlaying = false;
-                    setIsGeneratingVoice(true);
-                    setGeneratingAudioId('main');
+            if (audioStream) {
+              const fetchTime = Date.now() - streamStartTime;
+              console.log(`[JournalApp] ✅ Audio stream received in ${fetchTime}ms, starting progressive playback...`);
+
+              // Clear loading state immediately - playback will start in 2-3 seconds
+              setIsGeneratingVoice(false);
+              setGeneratingAudioId(null);
+
+              // Play stream directly for progressive playback (don't await - it runs async)
+              playAudio(audioStream, 'main');
+              console.log('[JournalApp] ✅ Playback initiated (will start in 2-3s as stream buffers)');
+
+              // Note: We can't easily cache streaming audio since it's consumed during playback
+              // The cache will be populated next time when we use the generateSpeech fallback
+            } else {
+              // Fallback to old method if streaming not available
+              console.log('[JournalApp] Streaming not available, falling back to base64 method...');
+              const audioResult = await generateSpeech(reflection.content, {
+                chunked: reflection.content.length > 1500
+              });
+
+              if (audioResult) {
+                const audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
+                setCurrentAudioBase64(audioData);
+
+                // Cache the audio
+                if (typeof audioResult === 'string') {
+                  await audioCache.set(reflection.content, audioResult);
+
+                  // Automatically save to database when audio is first generated
+                  if (userId && !isDemoMode && currentHistoryId) {
+                    historyService.saveEntryAudio(currentHistoryId, audioResult)
+                      .then(() => {
+                        console.log(`[JournalApp] ✅ Audio saved to database for entry ${currentHistoryId}`);
+                      })
+                      .catch(saveErr => {
+                        console.error('[JournalApp] Failed to save audio to database:', saveErr);
+                      });
                   }
-                  
-                  // Cache the audio (only if playback succeeded or if it's the final complete audio)
-                  if (hasStartedPlaying || isComplete) {
-                    await audioCache.set(reflection.content, partialBase64);
-                    
-                    // Save to database
-                    if (userId && !isDemoMode && currentHistoryId) {
-                      const audioToSave = partialBase64; // Already optimized as MP3 from server
-                      historyService.saveEntryAudio(currentHistoryId, audioToSave)
-                        .then(() => {
-                          console.log(`[JournalApp] ✅ Audio saved to database for entry ${currentHistoryId}`);
-                        })
-                        .catch(err => {
-                          console.warn('[JournalApp] Audio save failed:', err);
-                        });
-                    }
-                  }
-                } else if (!isComplete && !hasStartedPlaying) {
-                  // Partial data received but not enough to play yet
-                  console.log(`[JournalApp] Audio generation progress: ${(partialBase64.length * 0.75 / 1024).toFixed(0)}KB received, waiting for more...`);
                 }
-              }
-            });
 
-            if (audioResult && !hasStartedPlaying) {
-              // Fallback: if onProgress didn't trigger (shouldn't happen), use result
-              const audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
-              setCurrentAudioBase64(audioData);
-
-              // Cache the audio
-              if (typeof audioResult === 'string') {
-                await audioCache.set(reflection.content, audioResult);
-
-                // Automatically save to database when audio is first generated
-                if (userId && !isDemoMode && currentHistoryId) {
-                  historyService.saveEntryAudio(currentHistoryId, audioResult)
-                    .then(() => {
-                      console.log(`[JournalApp] ✅ Audio saved to database for entry ${currentHistoryId}`);
-                    })
-                    .catch(saveErr => {
-                      console.error('[JournalApp] Failed to save audio to database:', saveErr);
-                    });
-                }
-              }
-
-              // Audio is stored in IndexedDB, no need to store in history state
-              // This avoids localStorage quota issues
-
-              // Only play if onProgress hasn't already started playback
-              if (!hasStartedPlaying) {
+                // Play the audio
                 playAudio(audioData, 'main');
+              } else {
+                showToast('Could not generate audio. Please try again.', 'error');
               }
-            } else if (!hasStartedPlaying) {
-              showToast('Could not generate audio. Please try again.', 'error');
             }
           }
         } catch (error) {
@@ -1573,7 +1506,7 @@ const JournalApp: React.FC = () => {
       // Priority: 1) In-memory audio (from history entry), 2) Database audio (on-demand), 3) Local cache, 4) Generate new
       const entryId = id.replace('history-', '');
       const historyEntry = history.find(h => h.id === entryId);
-      let audioData: string | string[] | null = null;
+      let audioData: string | string[] | ReadableStream<Uint8Array> | null = null;
 
       // Check if audio is already in memory (from history entry)
       if (historyEntry?.audioBase64) {
@@ -1609,6 +1542,28 @@ const JournalApp: React.FC = () => {
       // Only fetch if we have a valid entry ID and user is authenticated
       if (entryId && userId && !isDemoMode) {
         console.log(`[handleHistoryAudioPlayback] Fetching audio from database for entry ${entryId}...`);
+
+        // Fetch as streaming audio from the API endpoint
+        try {
+          const response = await fetch(`/api/history/audio?entryId=${encodeURIComponent(entryId)}`, {
+            method: 'GET',
+          });
+
+          if (response.ok && response.body) {
+            const contentType = response.headers.get('Content-Type');
+            if (contentType && contentType.includes('audio/')) {
+              // Handle streaming response directly
+              setIsGeneratingVoice(false);
+              setGeneratingAudioId(null);
+              playAudio(response.body, id);
+              return;
+            }
+          }
+        } catch (fetchError) {
+          console.warn('Streaming fetch failed:', fetchError);
+        }
+
+        // Fallback to base64 response using historyService
         const dbAudio = await historyService.fetchEntryAudio(entryId);
         if (dbAudio) {
           audioData = dbAudio;
@@ -1622,6 +1577,7 @@ const JournalApp: React.FC = () => {
       }
 
       // Generate new audio with retry logic for iOS background suspension
+      // Use streaming generation with progressive playback
       const needsChunking = text.length > 1500;
       const audioResult = await withRetry(
         `generate-tts-${id}`,
@@ -1896,11 +1852,10 @@ const JournalApp: React.FC = () => {
           try {
             // Check cache first
             const cached = await audioCache.get(content);
-            let audioResult: string | null = null;
 
             if (cached) {
+              console.log('[JournalApp] Auto-play using cached audio');
               // Use cached audio
-              audioResult = typeof cached === 'string' ? cached : cached[0];
               const audioData = typeof cached === 'string' ? [cached] : cached;
               setCurrentAudioBase64(audioData);
 
@@ -1908,44 +1863,66 @@ const JournalApp: React.FC = () => {
               setHistory(prev => prev.map(h =>
                 h.id === newId ? { ...h, audioBase64: cached } : h
               ));
-            } else {
-              // Generate new audio with retry logic for iOS background suspension
-              const needsChunking = content.length > 1500;
-              const generated = await withRetry(
-                'generate-tts-main',
-                () => generateSpeech(content, {
-                  chunked: needsChunking
-                }),
-                3,
-                2000
-              );
 
-              if (!generated) {
-                showToast('Could not generate audio automatically.', 'error');
+              // Clear loading state and play
+              setIsGeneratingVoice(false);
+              setGeneratingAudioId(null);
+              playAudio(audioData, 'main');
+            } else {
+              // Use streaming for immediate playback (just like manual play)
+              console.log('[JournalApp] Auto-play using streaming audio...');
+              const streamStartTime = Date.now();
+              const audioStream = await generateSpeechStream(content);
+
+              if (audioStream) {
+                const fetchTime = Date.now() - streamStartTime;
+                console.log(`[JournalApp] Auto-play: Audio stream received in ${fetchTime}ms, starting progressive playback...`);
+
+                // Clear loading state immediately - playback will start in 2-3 seconds
                 setIsGeneratingVoice(false);
                 setGeneratingAudioId(null);
-                return;
-              }
 
-              audioResult = typeof generated === 'string' ? generated : generated[0];
-              const audioData = Array.isArray(generated) ? generated : [generated];
-              setCurrentAudioBase64(audioData);
+                // Play stream directly for progressive playback
+                playAudio(audioStream, 'main');
+                console.log('[JournalApp] Auto-play: Playback initiated (will start in 2-3s)');
 
-              // Update history entry with audio
-              setHistory(prev => prev.map(h =>
-                h.id === newId ? { ...h, audioBase64: audioResult || undefined } : h
-              ));
+                // Note: Streaming audio can't be easily cached since it's consumed during playback
+                // On next play, we'll fall back to generateSpeech which will cache it
+              } else {
+                // Fallback to old method if streaming not available
+                console.log('[JournalApp] Auto-play: Streaming not available, falling back to base64...');
+                const generated = await withRetry(
+                  'generate-tts-main',
+                  () => generateSpeech(content, { chunked: content.length > 1500 }),
+                  3,
+                  2000
+                );
 
-              // Cache the audio in IndexedDB
-              if (typeof generated === 'string') {
-                await audioCache.set(content, generated);
-              }
-            }
+                if (!generated) {
+                  showToast('Could not generate audio automatically.', 'error');
+                  setIsGeneratingVoice(false);
+                  setGeneratingAudioId(null);
+                  return;
+                }
 
-            // Automatically save audio to database immediately after generation/cache retrieval
-            // Start sync immediately without waiting - fire and forget
-            // This ensures audio syncs to cloud right after TTS generation finishes, not after playback
-            if (userId && !isDemoMode && newId && audioResult && typeof audioResult === 'string') {
+                const audioData = Array.isArray(generated) ? generated : [generated];
+                setCurrentAudioBase64(audioData);
+
+                // Update history entry with audio
+                const audioResult = typeof generated === 'string' ? generated : generated[0];
+                setHistory(prev => prev.map(h =>
+                  h.id === newId ? { ...h, audioBase64: audioResult || undefined } : h
+                ));
+
+                // Cache the audio in IndexedDB
+                if (typeof generated === 'string') {
+                  await audioCache.set(content, generated);
+                }
+
+                // Automatically save audio to database immediately after generation/cache retrieval
+                // Start sync immediately without waiting - fire and forget
+                // This ensures audio syncs to cloud right after TTS generation finishes, not after playback
+                if (userId && !isDemoMode && newId && audioResult && typeof audioResult === 'string') {
               console.log(`[JournalApp] Starting immediate audio sync to database for entry ${newId}`);
 
               // Start optimization and save immediately (don't await - fire and forget)
@@ -1988,15 +1965,12 @@ const JournalApp: React.FC = () => {
                   .catch(() => { });
               });
 
-              // Note: We don't await - this runs in background so audio can play immediately
-            }
+                  // Note: We don't await - this runs in background so audio can play immediately
+                }
 
-            // Play audio automatically (since auto-play is enabled)
-            if (audioResult) {
-              const audioDataToPlay = typeof audioResult === 'string'
-                ? [audioResult]
-                : (cached && Array.isArray(cached) ? cached : [audioResult]);
-              playAudio(audioDataToPlay, 'main');
+                // Play audio automatically (since auto-play is enabled)
+                playAudio(audioData, 'main');
+              }
             }
           } catch (error) {
             console.error('Auto TTS generation error:', error);

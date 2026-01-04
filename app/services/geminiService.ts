@@ -1311,10 +1311,10 @@ async function generateSpeechChunk(
         throw new Error(errorData.message || `TTS API error: ${response.status}`);
       }
 
-      // Check if response is binary streaming (audio/wav) or regular JSON
+      // Check if response is binary streaming (audio/mpeg for MP3) or regular JSON
       const contentType = response.headers.get('Content-Type') || '';
-      if (contentType.includes('audio/wav') || contentType.includes('audio/')) {
-        // Handle streaming binary audio response
+      if (contentType.includes('audio/')) {
+        // Handle streaming binary audio response (MP3 from Cartesia API)
         const reader = response.body?.getReader();
 
         if (!reader) {
@@ -1356,7 +1356,7 @@ async function generateSpeechChunk(
               }
 
               // Progressive playback: trigger callback once we have enough data to start playing
-              // Try to play as soon as we have 200KB - WAV decoder might work with partial data
+              // Try to play as soon as we have 200KB - MP3 decoder might work with partial data
               if (onProgress && !hasTriggeredProgress && (totalBytes >= MIN_BUFFER_SIZE || chunkCount >= MIN_CHUNK_COUNT)) {
                 hasTriggeredProgress = true;
                 
@@ -1374,7 +1374,7 @@ async function generateSpeechChunk(
                 log.debug(`[TTS] Progressive playback ready: ${chunkCount} chunks, ${(totalBytes / 1024).toFixed(0)}KB in ${progressTime}ms - attempting early playback`);
                 
                 // Call progress callback with partial audio marked as complete to try early playback
-                // If WAV decoder fails, we'll call again when stream completes
+                // If MP3 decoder fails, we'll call again when stream completes
                 onProgress(partialBase64, true);
               }
             }
@@ -1390,7 +1390,8 @@ async function generateSpeechChunk(
           // Combine binary chunks into single ArrayBuffer
           let combinedBuffer: ArrayBuffer;
           if (chunks.length === 1) {
-            combinedBuffer = chunks[0].buffer.slice(chunks[0].byteOffset, chunks[0].byteOffset + chunks[0].byteLength);
+            // Create a new ArrayBuffer with the correct size to avoid SharedArrayBuffer issues
+            combinedBuffer = chunks[0].buffer.slice(chunks[0].byteOffset, chunks[0].byteOffset + chunks[0].byteLength) as ArrayBuffer;
           } else {
             const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
             const combined = new Uint8Array(totalLength);
@@ -1447,6 +1448,70 @@ async function generateSpeechChunk(
   }
 
   return undefined;
+}
+
+/**
+ * Generate speech and return raw streaming audio (ReadableStream)
+ * This bypasses base64 conversion for true progressive playback
+ * Use this for immediate playback with createProgressiveAudioPlayer
+ */
+export async function generateSpeechStream(text: string): Promise<ReadableStream<Uint8Array> | undefined> {
+  try {
+    const fetchStartTime = Date.now();
+    log.debug('TTS: Fetching audio stream...', { textLength: text.length });
+
+    const response = await fetch('/api/tts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text }),
+    });
+
+    const fetchTime = Date.now() - fetchStartTime;
+    log.debug(`TTS: Response received in ${fetchTime}ms`, {
+      status: response.status,
+      contentType: response.headers.get('Content-Type')
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || `TTS API error: ${response.status}`);
+    }
+
+    // Check if response is streaming audio
+    const contentType = response.headers.get('Content-Type') || '';
+    if (contentType.includes('audio/') && response.body) {
+      log.debug('TTS: Returning raw audio stream for progressive playback', {
+        textLength: text.length,
+        contentType
+      });
+      return response.body;
+    } else {
+      // Fallback to JSON response - convert base64 to stream
+      const data = await response.json();
+      if (data.audioData) {
+        // Convert base64 to binary and create a stream
+        const binary = atob(data.audioData);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        // Create a readable stream from the bytes
+        return new ReadableStream({
+          start(controller) {
+            controller.enqueue(bytes);
+            controller.close();
+          }
+        });
+      }
+    }
+
+    return undefined;
+  } catch (error) {
+    log.error('TTS streaming error', {}, error as Error);
+    throw error;
+  }
 }
 
 // Main function with deduplication and chunking support
