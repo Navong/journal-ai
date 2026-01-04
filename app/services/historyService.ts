@@ -282,6 +282,58 @@ export const historyService = {
     }
   },
 
+  // Save S3 key for a specific entry
+  async saveEntryAudioS3Key(entryId: string, s3Key: string): Promise<void> {
+    try {
+      const response = await fetch('/api/history/audio/s3key', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ entryId, s3Key }),
+      });
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to save S3 key';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.message || errorData.error || errorMessage;
+        } catch (parseError) {
+          errorMessage = response.statusText || errorMessage;
+        }
+        log.error('Failed to save S3 key', { entryId, status: response.status, errorMessage });
+        throw new Error(`Failed to save S3 key: ${errorMessage} (${response.status})`);
+      }
+
+      log.info(`Successfully saved S3 key for entry ${entryId}`);
+    } catch (error) {
+      log.error('Failed to save S3 key', { entryId }, error as Error);
+      throw error;
+    }
+  },
+
+  // Get S3 key for a specific entry
+  async getEntryAudioS3Key(entryId: string): Promise<string | null> {
+    try {
+      const response = await fetch(`/api/history/audio/s3key?entryId=${encodeURIComponent(entryId)}`, {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          return null; // No S3 key found
+        }
+        throw new Error(`Failed to get S3 key: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      return data.s3Key || null;
+    } catch (error) {
+      log.error('Failed to get S3 key', { entryId }, error as Error);
+      return null;
+    }
+  },
+
   // Save audio data for a specific entry (async optimization)
   async saveEntryAudio(entryId: string, audioData: string): Promise<void> {
     try {

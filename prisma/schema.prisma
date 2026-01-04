@@ -17,9 +17,10 @@ model JournalEntry {
   summary        String?  @map("summary")
   topic          String?
   mood           String?
-  audioData      String?  @map("audio_data")  // Gzip-compressed base64 WAV (70-80% smaller, ~1.5MB instead of 6MB)
-  entities       Json?    @map("entities")     // Extracted entities (people, places, events, organizations)
-  highlights     Json?    @map("highlights")   // AI-detected phrases to highlight (4 categories)
+  audioData      String?  @map("audio_data") // Base64 WAV (legacy, kept for backward compatibility)
+  audioS3Key     String?  @map("audio_s3_key") // S3 object key for cached audio
+  entities       Json?    @map("entities") // Extracted entities (people, places, events, organizations)
+  highlights     Json?    @map("highlights") // AI-detected phrases to highlight (4 categories)
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
@@ -27,6 +28,7 @@ model JournalEntry {
   @@index([createdAt(sort: Desc)])
   @@index([userId, createdAt(sort: Desc)]) // Composite index for faster user queries with sorting
   @@index([userId, id]) // Composite index for faster audio fetch queries
+  @@index([audioS3Key]) // Index for S3 key lookups
   @@map("journal_entries")
 }
 

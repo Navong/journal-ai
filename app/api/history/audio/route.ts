@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/app/auth';
 import { prisma } from '@/app/utils/prisma';
+import { generatePresignedUrl, isS3Configured } from '@/app/utils/s3Service';
 // Migration will be imported dynamically if needed
 
 /**
@@ -88,7 +89,8 @@ export async function GET(request: NextRequest) {
         id: entryId,
       },
       select: {
-        audioData: true, // Only fetch audio data
+        audioData: true, // Legacy audio data (backward compatibility)
+        audioS3Key: true, // S3 key for new storage method
         userId: true, // Need userId for ownership verification
       },
     });
@@ -105,6 +107,57 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Entry not found or unauthorized' }, { status: 404 });
     }
 
+    // Check for S3 key first (new storage method)
+    if (entry.audioS3Key && isS3Configured()) {
+      const s3StartTime = Date.now();
+      console.log(`[API] [Performance] [S3] Found audioS3Key for entry ${entryId}: ${entry.audioS3Key}`);
+      try {
+        const urlStartTime = Date.now();
+        const presignedUrl = await generatePresignedUrl(entry.audioS3Key);
+        const urlTime = Date.now() - urlStartTime;
+        console.log(`[API] [Performance] [S3] Generated pre-signed URL in ${urlTime}ms`);
+        
+        if (streaming) {
+          // For streaming mode, fetch from S3 and stream to client
+          const fetchStartTime = Date.now();
+          console.log(`[API] [Performance] [S3] Fetching audio stream from S3...`);
+          const s3Response = await fetch(presignedUrl);
+          const fetchTime = Date.now() - fetchStartTime;
+          
+          if (s3Response.ok && s3Response.body) {
+            const totalTime = Date.now() - s3StartTime;
+            console.log(`[API] [Performance] [S3] ✅ Audio stream from S3 for entry ${entryId} (total: ${totalTime}ms, fetch: ${fetchTime}ms)`);
+            return new Response(s3Response.body, {
+              headers: {
+                'Content-Type': 'audio/wav',
+                'Cache-Control': 'public, max-age=31536000',
+              },
+            });
+          } else {
+            console.error(`[API] [Performance] [S3] ❌ S3 fetch failed: status ${s3Response.status}`);
+            throw new Error(`S3 fetch failed: ${s3Response.status}`);
+          }
+        } else {
+          // For JSON mode, return S3 URL
+          const totalTime = Date.now() - s3StartTime;
+          console.log(`[API] [Performance] [S3] ✅ Returning S3 URL for entry ${entryId} (total: ${totalTime}ms)`);
+          return NextResponse.json({ 
+            audioS3Url: presignedUrl,
+            audioS3Key: entry.audioS3Key 
+          });
+        }
+      } catch (error) {
+        const totalTime = Date.now() - s3StartTime;
+        console.error(`[API] [Performance] [S3] ❌ Failed to fetch from S3 after ${totalTime}ms, falling back to audioData:`, error);
+        // Fall through to audioData fallback
+      }
+    } else {
+      if (entry.audioS3Key && !isS3Configured()) {
+        console.log(`[API] [Performance] Entry has audioS3Key but S3 not configured, falling back to audioData`);
+      }
+    }
+
+    // Fallback to audioData (backward compatibility)
     if (!entry.audioData) {
       console.log(`[API] [Performance] No audio data found after ${queryEndTime - queryStartTime}ms`);
       return NextResponse.json({ error: 'Audio not found for this entry' }, { status: 404 });
