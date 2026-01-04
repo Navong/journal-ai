@@ -108,6 +108,7 @@ const JournalApp: React.FC = () => {
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const currentAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const progressivePlayerRef = useRef<Awaited<ReturnType<typeof createProgressiveAudioPlayer>> | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1.0);
@@ -823,6 +824,16 @@ const JournalApp: React.FC = () => {
     shouldContinuePlayingRef.current = false;
     currentPlaybackIdRef.current = null;
 
+    // Stop progressive audio player if active
+    if (progressivePlayerRef.current) {
+      try {
+        progressivePlayerRef.current.stop();
+      } catch (e) {
+        console.error('Error stopping progressive player:', e);
+      }
+      progressivePlayerRef.current = null;
+    }
+
     if (currentAudioSourceRef.current) {
       try {
         // Disconnect and stop the source
@@ -843,6 +854,17 @@ const JournalApp: React.FC = () => {
   const pauseCurrentAudio = () => {
     if (!shouldContinuePlayingRef.current) return; // Don't pause if already stopped
 
+    // Pause progressive player if active
+    if (progressivePlayerRef.current) {
+      try {
+        progressivePlayerRef.current.pause();
+        setIsPaused(true);
+      } catch (e) {
+        console.error('Error pausing progressive player:', e);
+      }
+      return;
+    }
+
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
       audioContextRef.current.suspend().then(() => {
         if (shouldContinuePlayingRef.current) { // Check again after async operation
@@ -854,6 +876,20 @@ const JournalApp: React.FC = () => {
 
   const resumeCurrentAudio = () => {
     if (!shouldContinuePlayingRef.current) return; // Don't resume if stopped
+
+    // Resume progressive player if active
+    if (progressivePlayerRef.current) {
+      try {
+        progressivePlayerRef.current.resume().then(() => {
+          if (shouldContinuePlayingRef.current) {
+            setIsPaused(false);
+          }
+        }).catch(console.error);
+      } catch (e) {
+        console.error('Error resuming progressive player:', e);
+      }
+      return;
+    }
 
     if (audioContextRef.current) {
       const ctxState = audioContextRef.current.state as string;
@@ -1218,31 +1254,44 @@ const JournalApp: React.FC = () => {
     if (audioData instanceof ReadableStream) {
       try {
         const player = await createProgressiveAudioPlayer();
+        progressivePlayerRef.current = player;
 
         // Update state immediately - playback will start in 2-3 seconds
         setIsPlayingAudio(true);
         setIsPaused(false);
         setActiveAudioId(id);
+        shouldContinuePlayingRef.current = true;
+        currentPlaybackIdRef.current = id;
 
         // Start playback asynchronously (don't await - let it run in background)
         player.play(audioData).then(() => {
           // Playback completed successfully
           console.log('[playAudio] Streaming playback completed');
+          if (progressivePlayerRef.current === player) {
+            progressivePlayerRef.current = null;
+          }
           setIsPlayingAudio(false);
           setIsPaused(false);
           setActiveAudioId(null);
+          currentPlaybackIdRef.current = null;
         }).catch((error) => {
           console.error('Error during streaming playback:', error);
+          if (progressivePlayerRef.current === player) {
+            progressivePlayerRef.current = null;
+          }
           showToast('Error playing audio', 'error');
           setIsPlayingAudio(false);
           setIsPaused(false);
           setActiveAudioId(null);
+          currentPlaybackIdRef.current = null;
         });
       } catch (error) {
         console.error('Error initializing streaming audio:', error);
+        progressivePlayerRef.current = null;
         showToast('Error playing audio', 'error');
         setIsPlayingAudio(false);
         setActiveAudioId(null);
+        currentPlaybackIdRef.current = null;
       }
       return;
     }
@@ -1389,17 +1438,15 @@ const JournalApp: React.FC = () => {
     // Ensure AudioContext is created/resumed on user interaction (required for mobile)
     ensureAudioContext();
 
+    // If audio is playing, stop it
     if (isPlayingAudio && activeAudioId === 'main') {
-      console.log('[handleTogglePlayback] Path: Toggle pause/resume');
-      if (isPaused) {
-        resumeCurrentAudio();
-      } else {
-        pauseCurrentAudio();
-      }
-    } else if (isPaused && activeAudioId === 'main') {
-      console.log('[handleTogglePlayback] Path: Resume from pause');
-      resumeCurrentAudio();
-    } else {
+      console.log('[handleTogglePlayback] Path: Stop playing audio');
+      stopCurrentAudio();
+      return;
+    }
+    
+    // Otherwise, start new playback
+    {
       if (currentAudioBase64 && (activeAudioId !== 'main' || !isPlayingAudio)) {
         console.log('[handleTogglePlayback] Path: Play existing currentAudioBase64');
         const audioData = typeof currentAudioBase64 === 'string'
@@ -1413,19 +1460,20 @@ const JournalApp: React.FC = () => {
         setIsGeneratingVoice(true);
         setGeneratingAudioId('main');
         try {
+          // IndexedDB cache disabled - always use streaming from S3
           // Check cache first
-          console.log('[handleTogglePlayback] Checking IndexedDB cache...');
-          const cached = await audioCache.get(reflection.content);
-          console.log('[handleTogglePlayback] Cache result:', cached ? `found (${typeof cached})` : 'not found');
-          if (cached) {
-            const audioData = typeof cached === 'string' ? cached : [cached];
-            setCurrentAudioBase64(audioData);
-            playAudio(audioData, 'main');
-          } else {
+          // console.log('[handleTogglePlayback] IndexedDB cache disabled - using S3 streaming');
+          // const cached = await audioCache.get(reflection.content);
+          // console.log('[handleTogglePlayback] Cache result:', cached ? `found (${typeof cached})` : 'not found');
+          // if (cached) {
+          //   const audioData = typeof cached === 'string' ? cached : [cached];
+          //   setCurrentAudioBase64(audioData);
+          //   playAudio(audioData, 'main');
+          // } else {
             // Use direct streaming for immediate playback (like test page)
             console.log('[JournalApp] Generating streaming audio for reflection...');
             const streamStartTime = Date.now();
-            const audioStream = await generateSpeechStream(reflection.content);
+            const audioStream = await generateSpeechStream(reflection.content, currentHistoryId || undefined);
 
             if (audioStream) {
               const fetchTime = Date.now() - streamStartTime;
@@ -1435,35 +1483,11 @@ const JournalApp: React.FC = () => {
               setIsGeneratingVoice(false);
               setGeneratingAudioId(null);
 
-              // Split stream: one for playback, one for caching
-              const [playStream, cacheStream] = audioStream.tee();
-
               // Play stream directly for progressive playback (don't await - it runs async)
-              playAudio(playStream, 'main');
+              // IndexedDB caching disabled - S3 provides fast enough streaming
+              playAudio(audioStream, 'main');
               console.log('[JournalApp] ✅ Playback initiated (will start in 2-3s as stream buffers)');
-
-              // Cache the audio in the background (don't await - let it run async)
-              streamToBase64(cacheStream).then(base64Audio => {
-                // Save to IndexedDB for fast playback
-                audioCache.set(reflection.content, base64Audio).then(() => {
-                  console.log('[JournalApp] ✅ Audio cached in IndexedDB');
-
-                  // Also save to database for cross-device access
-                  if (userId && !isDemoMode && currentHistoryId) {
-                    historyService.saveEntryAudio(currentHistoryId, base64Audio)
-                      .then(() => {
-                        console.log(`[JournalApp] ✅ Audio saved to database for entry ${currentHistoryId}`);
-                      })
-                      .catch(saveErr => {
-                        console.error('[JournalApp] Failed to save audio to database:', saveErr);
-                      });
-                  }
-                }).catch(error => {
-                  console.warn('[JournalApp] Failed to cache audio:', error);
-                });
-              }).catch(error => {
-                console.warn('[JournalApp] Failed to convert stream to base64 for caching:', error);
-              });
+              console.log('[JournalApp] Audio will be available in S3 for future playback');
             } else {
               // Fallback to old method if streaming not available
               console.log('[JournalApp] Streaming not available, falling back to base64 method...');
@@ -1475,21 +1499,9 @@ const JournalApp: React.FC = () => {
                 const audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
                 setCurrentAudioBase64(audioData);
 
-                // Cache the audio
-                if (typeof audioResult === 'string') {
-                  await audioCache.set(reflection.content, audioResult);
-
-                  // Automatically save to database when audio is first generated
-                  if (userId && !isDemoMode && currentHistoryId) {
-                    historyService.saveEntryAudio(currentHistoryId, audioResult)
-                      .then(() => {
-                        console.log(`[JournalApp] ✅ Audio saved to database for entry ${currentHistoryId}`);
-                      })
-                      .catch(saveErr => {
-                        console.error('[JournalApp] Failed to save audio to database:', saveErr);
-                      });
-                  }
-                }
+                // IndexedDB caching disabled - S3 provides fast enough streaming
+                // Audio will be available in S3 for future playback
+                console.log('[JournalApp] Audio will be available in S3 for future playback');
 
                 // Play the audio
                 playAudio(audioData, 'main');
@@ -1497,7 +1509,6 @@ const JournalApp: React.FC = () => {
                 showToast('Could not generate audio. Please try again.', 'error');
               }
             }
-          }
         } catch (error) {
           console.error('TTS generation error:', error);
           showToast('Error generating speech. Please try again.', 'error');
@@ -1513,99 +1524,66 @@ const JournalApp: React.FC = () => {
     // Ensure AudioContext is created/resumed on user interaction (required for mobile)
     ensureAudioContext();
 
-    // Audio can be in: 1) history entry (from database), 2) IndexedDB cache, 3) needs generation
+    // If empty text, stop the audio (user clicked stop button)
+    if (!text && isPlayingAudio && activeAudioId === id) {
+      console.log('[handleHistoryAudioPlayback] Path: Stop playing audio');
+      stopCurrentAudio();
+      return;
+    }
 
+    // If audio is playing, stop it
     if (isPlayingAudio && activeAudioId === id) {
-      if (isPaused) {
-        resumeCurrentAudio();
-      } else {
-        pauseCurrentAudio();
-      }
+      console.log('[handleHistoryAudioPlayback] Path: Stop playing audio');
+      stopCurrentAudio();
       return;
     }
 
     setGeneratingAudioId(id);
     setIsGeneratingVoice(true);
     try {
-      // Priority: 1) In-memory audio (from history entry), 2) Database audio (on-demand), 3) Local cache, 4) Generate new
+      // Priority: 1) Database/S3 audio (on-demand streaming), 2) Generate new
+      // Note: IndexedDB caching disabled - S3 is fast enough for real-time streaming
       const entryId = id.replace('history-', '');
-      const historyEntry = history.find(h => h.id === entryId);
+      const historyEntry = history.find(h => h.id === entryId); // Keep for reference
       let audioData: string | string[] | ReadableStream<Uint8Array> | null = null;
 
-      // Check if audio is already in memory (from history entry)
-      if (historyEntry?.audioBase64) {
-        audioData = typeof historyEntry.audioBase64 === 'string'
-          ? historyEntry.audioBase64
-          : Array.isArray(historyEntry.audioBase64)
-            ? historyEntry.audioBase64
-            : null;
+      // IndexedDB cache disabled - always fetch from S3/database for fresh data
 
-        if (audioData) {
-          // Cache locally for faster future access
-          if (typeof historyEntry.audioBase64 === 'string') {
-            await audioCache.set(text, historyEntry.audioBase64);
-          }
-          setIsGeneratingVoice(false);
-          setGeneratingAudioId(null);
-          playAudio(audioData, id);
-          return;
-        }
-      }
-
-      // Check local cache (IndexedDB) - fastest option if available
-      const cached = await audioCache.get(text);
-      if (cached) {
-        audioData = typeof cached === 'string' ? cached : [cached];
-        setIsGeneratingVoice(false);
-        setGeneratingAudioId(null);
-        playAudio(audioData, id);
-        return;
-      }
-
-      // Try to fetch from database (optimized with streaming response)
+      // Try to fetch from database/S3 (optimized with streaming response)
       // Only fetch if we have a valid entry ID and user is authenticated
       if (entryId && userId && !isDemoMode) {
-        console.log(`[handleHistoryAudioPlayback] Checking database for cached audio for entry ${entryId}...`);
+        console.log(`[handleHistoryAudioPlayback] Fetching audio stream for entry ${entryId} (will use S3 if available)...`);
 
         try {
           // Fetch with streaming=true to get binary stream instead of JSON
+          // Server will automatically use S3 if audioS3Key exists, otherwise falls back to audioData
           const response = await fetch(`/api/history/audio?entryId=${encodeURIComponent(entryId)}&streaming=true`, {
             method: 'GET',
           });
 
           if (response.ok && response.body) {
-            console.log(`[handleHistoryAudioPlayback] ✅ Got cached audio stream from database, starting playback...`);
+            console.log(`[handleHistoryAudioPlayback] ✅ Got audio stream (S3 or database), starting playback...`);
             setIsGeneratingVoice(false);
             setGeneratingAudioId(null);
 
-            // Split stream: one for playback, one for caching
-            const [playStream, cacheStream] = response.body.tee();
-
             // Play stream directly for progressive playback
-            playAudio(playStream, id);
+            // IndexedDB caching disabled - S3 provides fast enough streaming
+            playAudio(response.body, id);
 
-            // Cache the audio locally for faster future access (don't await - let it run async)
-            streamToBase64(cacheStream).then(base64Audio => {
-              audioCache.set(text, base64Audio).then(() => {
-                console.log('[handleHistoryAudioPlayback] ✅ Database audio cached in IndexedDB');
-              }).catch(error => {
-                console.warn('[handleHistoryAudioPlayback] Failed to cache database audio:', error);
-              });
-            }).catch(error => {
-              console.warn('[handleHistoryAudioPlayback] Failed to convert database stream to base64 for caching:', error);
-            });
+            // IndexedDB caching disabled - S3 provides fast enough streaming
+            // No need to cache locally since S3 is almost real-time
 
             return;
           }
         } catch (fetchError) {
-          console.warn('[handleHistoryAudioPlayback] Database streaming fetch failed:', fetchError);
+          console.warn('[handleHistoryAudioPlayback] Audio stream fetch failed:', fetchError);
         }
       }
 
       // Generate new audio with STREAMING for progressive playback (like main reflection)
       console.log('[handleHistoryAudioPlayback] No cached audio found, generating with streaming...');
       const streamStartTime = Date.now();
-      const audioStream = await generateSpeechStream(text);
+      const audioStream = await generateSpeechStream(text, entryId);
 
       if (audioStream) {
         const fetchTime = Date.now() - streamStartTime;
@@ -1615,35 +1593,11 @@ const JournalApp: React.FC = () => {
         setIsGeneratingVoice(false);
         setGeneratingAudioId(null);
 
-        // Split stream: one for playback, one for caching
-        const [playStream, cacheStream] = audioStream.tee();
-
         // Play stream directly for progressive playback (don't await - it runs async)
-        playAudio(playStream, id);
+        // IndexedDB caching disabled - S3 provides fast enough streaming
+        playAudio(audioStream, id);
         console.log('[handleHistoryAudioPlayback] ✅ Playback initiated (will start in 2-3s as stream buffers)');
-
-        // Cache the audio in the background (don't await - let it run async)
-        streamToBase64(cacheStream).then(base64Audio => {
-          // Save to IndexedDB for fast playback
-          audioCache.set(text, base64Audio).then(() => {
-            console.log('[handleHistoryAudioPlayback] ✅ Audio cached in IndexedDB');
-
-            // Also save to database for cross-device access
-            if (userId && !isDemoMode && historyEntry?.id) {
-              historyService.saveEntryAudio(historyEntry.id, base64Audio)
-                .then(() => {
-                  console.log(`[handleHistoryAudioPlayback] ✅ Audio saved to database for entry ${historyEntry.id}`);
-                })
-                .catch(saveErr => {
-                  console.error('[handleHistoryAudioPlayback] Failed to save audio to database:', saveErr);
-                });
-            }
-          }).catch(error => {
-            console.warn('[handleHistoryAudioPlayback] Failed to cache audio:', error);
-          });
-        }).catch(error => {
-          console.warn('[handleHistoryAudioPlayback] Failed to convert stream to base64 for caching:', error);
-        });
+        console.log('[handleHistoryAudioPlayback] Audio will be available in S3 for future playback');
       } else {
         // Fallback to old base64 method if streaming not available
         console.log('[handleHistoryAudioPlayback] Streaming not available, falling back to base64 method...');
@@ -1942,7 +1896,7 @@ const JournalApp: React.FC = () => {
               // Use streaming for immediate playback (just like manual play)
               console.log('[JournalApp] Auto-play using streaming audio...');
               const streamStartTime = Date.now();
-              const audioStream = await generateSpeechStream(content);
+              const audioStream = await generateSpeechStream(content, newId);
 
               if (audioStream) {
                 const fetchTime = Date.now() - streamStartTime;
@@ -1952,35 +1906,11 @@ const JournalApp: React.FC = () => {
                 setIsGeneratingVoice(false);
                 setGeneratingAudioId(null);
 
-                // Split stream: one for playback, one for caching
-                const [playStream, cacheStream] = audioStream.tee();
-
                 // Play stream directly for progressive playback
-                playAudio(playStream, 'main');
+                // IndexedDB caching disabled - S3 provides fast enough streaming
+                playAudio(audioStream, 'main');
                 console.log('[JournalApp] Auto-play: Playback initiated (will start in 2-3s)');
-
-                // Cache the audio in the background (don't await - let it run async)
-                streamToBase64(cacheStream).then(base64Audio => {
-                  // Save to IndexedDB for fast playback
-                  audioCache.set(content, base64Audio).then(() => {
-                    console.log('[JournalApp] ✅ Auto-play audio cached in IndexedDB');
-
-                    // Also save to database for cross-device access
-                    if (userId && !isDemoMode && newId) {
-                      historyService.saveEntryAudio(newId, base64Audio)
-                        .then(() => {
-                          console.log(`[JournalApp] ✅ Auto-play audio saved to database for entry ${newId}`);
-                        })
-                        .catch(saveErr => {
-                          console.error('[JournalApp] Failed to save auto-play audio to database:', saveErr);
-                        });
-                    }
-                  }).catch(error => {
-                    console.warn('[JournalApp] Failed to cache auto-play audio:', error);
-                  });
-                }).catch(error => {
-                  console.warn('[JournalApp] Failed to convert auto-play stream to base64 for caching:', error);
-                });
+                console.log('[JournalApp] Audio will be available in S3 for future playback');
               } else {
                 // Fallback to old method if streaming not available
                 console.log('[JournalApp] Auto-play: Streaming not available, falling back to base64...');
@@ -2007,10 +1937,8 @@ const JournalApp: React.FC = () => {
                   h.id === newId ? { ...h, audioBase64: audioResult || undefined } : h
                 ));
 
-                // Cache the audio in IndexedDB
-                if (typeof generated === 'string') {
-                  await audioCache.set(content, generated);
-                }
+                // IndexedDB caching disabled - S3 provides fast enough streaming
+                // Audio will be available in S3 for future playback
 
                 // Automatically save audio to database immediately after generation/cache retrieval
                 // Start sync immediately without waiting - fire and forget
@@ -2240,8 +2168,18 @@ const JournalApp: React.FC = () => {
 
   const handleStartFresh = () => {
     setShowStartNewDialog(false);
+    
+    // Stop and reset all audio state
     stopCurrentAudio();
     setCurrentAudioBase64(null);
+    setIsPlayingAudio(false);
+    setIsPaused(false);
+    setActiveAudioId(null);
+    setIsGeneratingVoice(false);
+    setGeneratingAudioId(null);
+    setPlaybackRate(1.0);
+    
+    // Reset session state
     setSessionKey(prev => prev + 1);
     setEntry('');
     setReflection(null);
@@ -2259,6 +2197,7 @@ const JournalApp: React.FC = () => {
       requestCount: 0,
     });
     chatSessionRef.current = null;
+    
     if (typeof window !== 'undefined') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -2704,7 +2643,6 @@ const JournalApp: React.FC = () => {
               reflection={reflection}
               isLoading={status === AppStatus.LOADING}
               onPlay={handleTogglePlayback}
-              onPause={pauseCurrentAudio}
               onStop={stopCurrentAudio}
               isPlaying={isPlayingAudio && activeAudioId === 'main'}
               isPaused={isPaused && activeAudioId === 'main'}
@@ -2807,7 +2745,6 @@ const JournalApp: React.FC = () => {
             onClearAll={clearAllHistory}
             onPlayAudio={handleHistoryAudioPlayback}
             onPauseAudio={pauseCurrentAudio}
-            onStopAudio={stopCurrentAudio}
             activeAudioId={activeAudioId}
             isPlaying={isPlayingAudio}
             isPaused={isPaused}

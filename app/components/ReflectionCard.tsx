@@ -69,9 +69,9 @@ export const ReflectionCard: React.FC<ReflectionCardProps> = ({
               A reflection from your companion
             </div>
             {/* Playback Controls */}
-            {(onPlay || onPause || onStop) && (
+            {(onPlay || onPause) && (
               <div className="flex items-center gap-2 flex-shrink-0">
-                {isPlaying && (
+                {isPlaying && !isPaused && (
                   <div className="flex items-center gap-1 bg-white/80 backdrop-blur-sm rounded-full px-2 py-1 shadow-sm border border-stone-200">
                     <button
                       onClick={() => onPlaybackRateChange?.(Math.max(0.5, playbackRate - 0.25))}
@@ -93,68 +93,69 @@ export const ReflectionCard: React.FC<ReflectionCardProps> = ({
                   </div>
                 )}
                 
-                {/* Play Button */}
-                {onPlay && (
-                  <button
-                    onClick={onPlay}
-                    disabled={isGeneratingVoice || (isPlaying && !isPaused)}
-                    className={`transition-all p-2.5 md:p-2 rounded-full active:scale-90 touch-manipulation min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center ${
-                      isGeneratingVoice || (isPlaying && !isPaused)
-                        ? 'bg-stone-100 text-stone-300 cursor-not-allowed opacity-50'
-                        : 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100'
-                    }`}
-                    title={isGeneratingVoice ? "Generating..." : "Play"}
-                  >
-                    {isGeneratingVoice ? (
-                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                    ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                {/* Single Play/Stop Toggle Button */}
+                <button
+                  onClick={() => {
+                    if (isPlaying && !isPaused) {
+                      onStop?.();
+                    } else {
+                      onPlay?.();
+                    }
+                  }}
+                  disabled={isGeneratingVoice}
+                  className={`
+                    relative transition-all duration-300 ease-in-out
+                    p-2.5 md:p-2 rounded-full 
+                    active:scale-90 touch-manipulation 
+                    min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 
+                    flex items-center justify-center
+                    ${isGeneratingVoice
+                      ? 'bg-stone-100 text-stone-300 cursor-not-allowed opacity-50'
+                      : 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100 hover:scale-105'
+                    }
+                  `}
+                  title={isGeneratingVoice ? "Generating..." : (isPlaying && !isPaused ? "Stop" : "Play")}
+                >
+                  {isGeneratingVoice ? (
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  ) : (
+                    <div className="relative w-4 h-4">
+                      {/* Play Icon */}
+                      <svg 
+                        xmlns="http://www.w3.org/2000/svg" 
+                        className={`absolute inset-0 h-4 w-4 transition-all duration-300 ease-in-out ${
+                          isPlaying && !isPaused 
+                            ? 'opacity-0 scale-0 rotate-90' 
+                            : 'opacity-100 scale-100 rotate-0'
+                        }`}
+                        fill="none" 
+                        viewBox="0 0 24 24" 
+                        stroke="currentColor"
+                      >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                    )}
-                  </button>
-                )}
-
-                {/* Pause Button */}
-                {onPause && (
-                  <button
-                    onClick={onPause}
-                    disabled={!isPlaying || isPaused || isGeneratingVoice}
-                    className={`transition-all p-2.5 md:p-2 rounded-full active:scale-90 touch-manipulation min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center ${
-                      !isPlaying || isPaused || isGeneratingVoice
-                        ? 'bg-stone-100 text-stone-300 cursor-not-allowed opacity-50'
-                        : 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100'
-                    }`}
-                    title="Pause"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </button>
-                )}
-
-                {/* Stop Button */}
-                {onStop && (
-                  <button
-                    onClick={onStop}
-                    disabled={!isPlaying && !isPaused || isGeneratingVoice}
-                    className={`transition-all p-2.5 md:p-2 rounded-full active:scale-90 touch-manipulation min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center ${
-                      (!isPlaying && !isPaused) || isGeneratingVoice
-                        ? 'bg-stone-100 text-stone-300 cursor-not-allowed opacity-50'
-                        : 'text-rose-600 bg-rose-50 hover:bg-rose-100'
-                    }`}
-                    title="Stop"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10h6v4H9z" />
-                    </svg>
-                  </button>
-                )}
+                      {/* Stop Icon */}
+                      <svg 
+                        xmlns="http://www.w3.org/2000/svg" 
+                        className={`absolute inset-0 h-4 w-4 transition-all duration-300 ease-in-out ${
+                          isPlaying && !isPaused 
+                            ? 'opacity-100 scale-100 rotate-0' 
+                            : 'opacity-0 scale-0 -rotate-90'
+                        }`}
+                        fill="none" 
+                        viewBox="0 0 24 24" 
+                        stroke="currentColor"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9h6v6H9z" />
+                      </svg>
+                    </div>
+                  )}
+                </button>
               </div>
             )}
           </div>

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/app/auth';
 import { prisma } from '@/app/utils/prisma';
-import { generatePresignedUrl, isS3Configured } from '@/app/utils/s3Service';
+import { generatePresignedUrl, isS3Configured, uploadAudio } from '@/app/utils/s3Service';
+import { hashTTSInput } from '@/app/utils/textHash';
 // Migration will be imported dynamically if needed
 
 /**
@@ -91,6 +92,7 @@ export async function GET(request: NextRequest) {
       select: {
         audioData: true, // Legacy audio data (backward compatibility)
         audioS3Key: true, // S3 key for new storage method
+        reflectionText: true, // Need reflection text to generate S3 key
         userId: true, // Need userId for ownership verification
       },
     });
@@ -108,9 +110,11 @@ export async function GET(request: NextRequest) {
     }
 
     // Check for S3 key first (new storage method)
+    console.log(`[API] [Performance] Checking audio storage for entry ${entryId}: audioS3Key=${entry.audioS3Key ? 'present' : 'null'}, audioData=${entry.audioData ? `present (${(entry.audioData.length / 1024).toFixed(1)}KB)` : 'null'}, isS3Configured=${isS3Configured()}`);
+    
     if (entry.audioS3Key && isS3Configured()) {
       const s3StartTime = Date.now();
-      console.log(`[API] [Performance] [S3] Found audioS3Key for entry ${entryId}: ${entry.audioS3Key}`);
+      console.log(`[API] [Performance] [S3] ✅ Using S3 for entry ${entryId}: ${entry.audioS3Key}`);
       try {
         const urlStartTime = Date.now();
         const presignedUrl = await generatePresignedUrl(entry.audioS3Key);
@@ -153,11 +157,14 @@ export async function GET(request: NextRequest) {
       }
     } else {
       if (entry.audioS3Key && !isS3Configured()) {
-        console.log(`[API] [Performance] Entry has audioS3Key but S3 not configured, falling back to audioData`);
+        console.log(`[API] [Performance] ⚠️ Entry has audioS3Key but S3 not configured, falling back to audioData`);
+      } else if (!entry.audioS3Key) {
+        console.log(`[API] [Performance] ⚠️ Entry has no audioS3Key, using audioData fallback`);
       }
     }
 
     // Fallback to audioData (backward compatibility)
+    console.log(`[API] [Performance] Using audioData fallback for entry ${entryId}`);
     if (!entry.audioData) {
       console.log(`[API] [Performance] No audio data found after ${queryEndTime - queryStartTime}ms`);
       return NextResponse.json({ error: 'Audio not found for this entry' }, { status: 404 });
@@ -165,21 +172,60 @@ export async function GET(request: NextRequest) {
 
     const audioSize = entry.audioData.length;
 
+    // Decode base64 to binary (needed for both streaming and S3 upload)
+    const decodeStartTime = Date.now();
+    const binaryString = atob(entry.audioData);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    const decodeEndTime = Date.now();
+
+    // Upload to S3 in the background if S3 is configured and we have reflection text
+    // This migrates old audioData to S3 for future use
+    if (isS3Configured() && entry.reflectionText && !entry.audioS3Key) {
+      (async () => {
+        try {
+          const uploadStartTime = Date.now();
+          console.log(`[API] [Migration] Starting background S3 upload for entry ${entryId}...`);
+          
+          // Generate S3 key using reflection text (same as TTS generation)
+          const voiceId = process.env.CARTESIA_VOICE_ID || '694f9389-aac1-45b6-b726-9d9369183238';
+          const textHash = hashTTSInput(entry.reflectionText, voiceId);
+          const s3Key = `audio/${userId}/${textHash}.wav`;
+          
+          console.log(`[API] [Migration] Generated S3 key: ${s3Key} for entry ${entryId}`);
+          
+          // Upload to S3
+          await uploadAudio(bytes, s3Key);
+          
+          // Save S3 key to database
+          try {
+            await prisma.journalEntry.update({
+              where: { id: entryId },
+              data: { audioS3Key: s3Key },
+            });
+            const uploadTime = Date.now() - uploadStartTime;
+            console.log(`[API] [Migration] ✅ Migrated audio to S3 for entry ${entryId} (${s3Key}) in ${uploadTime}ms`);
+          } catch (dbError: any) {
+            // Handle P2025 (record not found) gracefully
+            if (dbError.code === 'P2025') {
+              console.warn(`[API] [Migration] ⚠️ Entry ${entryId} not found when saving S3 key (may have been deleted)`);
+            } else {
+              throw dbError;
+            }
+          }
+        } catch (uploadError) {
+          console.error(`[API] [Migration] ❌ Failed to migrate audio to S3 for entry ${entryId}:`, uploadError);
+          // Don't throw - this is background migration, shouldn't affect user experience
+        }
+      })();
+    }
+
     // If streaming=true, return audio as binary stream instead of JSON
     // This avoids JSON serialization overhead (saves ~1-2 seconds)
     if (streaming) {
-      const decodeStartTime = Date.now();
-
-      // Decode base64 to binary
-      const binaryString = atob(entry.audioData);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-
-      const decodeEndTime = Date.now();
       const totalTime = decodeEndTime - requestStartTime;
-
       console.log(`[API] [Performance] ✅ Audio streaming completed in ${totalTime}ms (query: ${queryEndTime - queryStartTime}ms, decode: ${decodeEndTime - decodeStartTime}ms, size: ${(audioSize / 1024).toFixed(0)}KB → ${(bytes.length / 1024).toFixed(0)}KB binary)`);
 
       // Return as binary stream (WAV format for progressive decoding)
@@ -198,7 +244,7 @@ export async function GET(request: NextRequest) {
     const serializeEndTime = Date.now();
     const totalTime = serializeEndTime - requestStartTime;
 
-    console.log(`[API] [Performance] ✅ Audio fetch completed in ${totalTime}ms (query: ${queryEndTime - queryStartTime}ms, serialize: ${serializeEndTime - serializeStartTime}ms, size: ${(audioSize / 1024).toFixed(0)}KB)`);
+    console.log(`[API] [Performance] ✅ Audio fetch completed in ${totalTime}ms (query: ${queryEndTime - queryStartTime}ms, decode: ${decodeEndTime - decodeStartTime}ms, serialize: ${serializeEndTime - serializeStartTime}ms, size: ${(audioSize / 1024).toFixed(0)}KB)`);
     return response;
   } catch (error: any) {
     console.error('[API] Failed to fetch audio:', error);

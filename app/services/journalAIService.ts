@@ -37,12 +37,17 @@ export const detectTopic = async (entry: string): Promise<string | undefined> =>
 };
 
 // The TTS function now delegates to the server-side API route
-export const generateSpeechStream = async (text: string): Promise<ReadableStream<Uint8Array> | undefined> => {
+export const generateSpeechStream = async (text: string, entryId?: string): Promise<ReadableStream<Uint8Array> | undefined> => {
   try {
+    const requestBody: { text: string; entryId?: string } = { text };
+    if (entryId) {
+      requestBody.entryId = entryId;
+    }
+
     const response = await fetch('/api/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {

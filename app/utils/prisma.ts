@@ -28,8 +28,8 @@ if (connectionString) {
       idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
       connectionTimeoutMillis: 15000, // Return error after 15 seconds if connection could not be established (increased for remote databases)
       // Additional optimizations
-      statement_timeout: 30000, // 30 second query timeout
-      query_timeout: 30000,
+      statement_timeout: 60000, // 60 second query timeout (increased for large audio data saves)
+      query_timeout: 60000,
     });
 
     const adapter = new PrismaPg(pool);

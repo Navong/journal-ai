@@ -32,6 +32,8 @@ export async function createProgressiveAudioPlayer(options: ProgressiveAudioOpti
   let playbackStartTime: number | null = null;
   let partialDuration = 0;
   let partialEndedPromise: Promise<void> | null = null;
+  let streamReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let isStopped = false;
 
   // Initialize audio context
   const initAudioContext = async (): Promise<AudioContext> => {
@@ -101,7 +103,7 @@ export async function createProgressiveAudioPlayer(options: ProgressiveAudioOpti
   };
 
   // Play remaining audio from where partial left off
-  const playRemainingAudio = async (completeBuffer: Uint8Array, skipTo: number = 0) => {
+  const playRemainingAudio = async (completeBuffer: Uint8Array, skipTo: number = 0): Promise<void> => {
     const context = await initAudioContext();
 
     // Create complete audio buffer
@@ -116,17 +118,24 @@ export async function createProgressiveAudioPlayer(options: ProgressiveAudioOpti
     currentSource.connect(currentGainNode);
     currentGainNode.connect(context.destination);
 
-    // Set up completion handler
-    currentSource.onended = () => {
-      isCurrentlyPlaying = false;
-      isCurrentlyPaused = false;
-    };
+    // Set up promise to resolve when playback ends
+    const playbackEndedPromise = new Promise<void>((resolve) => {
+      currentSource!.onended = () => {
+        isCurrentlyPlaying = false;
+        isCurrentlyPaused = false;
+        console.log(`[ProgressivePlayer] ✅ Playback fully completed`);
+        resolve();
+      };
+    });
 
     // Start from specified position
     currentSource.start(0, skipTo);
     isCurrentlyPlaying = true;
     isCurrentlyPaused = false;
     playbackStartTime = Date.now();
+
+    // Wait for playback to complete
+    await playbackEndedPromise;
   };
 
   return {
@@ -135,10 +144,14 @@ export async function createProgressiveAudioPlayer(options: ProgressiveAudioOpti
         throw new Error('Audio stream is required');
       }
 
+      // Reset stop flag for new playback
+      isStopped = false;
+
       const streamStartTime = Date.now();
       console.log('[ProgressivePlayer] Starting to consume audio stream...');
 
       const reader = audioStream.getReader();
+      streamReader = reader;
       if (!reader) {
         throw new Error('No stream reader available');
       }
@@ -153,11 +166,33 @@ export async function createProgressiveAudioPlayer(options: ProgressiveAudioOpti
 
       try {
         while (true) {
+          // Check if stopped before reading
+          if (isStopped) {
+            console.log('[ProgressivePlayer] Playback stopped, cancelling stream...');
+            try {
+              reader.cancel();
+            } catch (e) {
+              // Reader may already be cancelled
+            }
+            break;
+          }
+
           const { done, value } = await reader.read();
 
           if (done) {
             const totalTime = Date.now() - streamStartTime;
             console.log(`[ProgressivePlayer] Stream complete: ${chunkCount} chunks, ${(totalBytes / 1024).toFixed(0)}KB in ${totalTime}ms`);
+            break;
+          }
+
+          // Check again after reading (stop might have been called during read)
+          if (isStopped) {
+            console.log('[ProgressivePlayer] Playback stopped after read, cancelling stream...');
+            try {
+              reader.cancel();
+            } catch (e) {
+              // Reader may already be cancelled
+            }
             break;
           }
 
@@ -216,7 +251,7 @@ export async function createProgressiveAudioPlayer(options: ProgressiveAudioOpti
         }
 
         // If early playback happened, prepare continuation audio while partial plays
-        if (earlyPlaybackStarted && partialEndedPromise) {
+        if (earlyPlaybackStarted && partialEndedPromise && !isStopped) {
           console.log(`[ProgressivePlayer] Stream complete, preparing continuation audio while partial plays...`);
 
           // Decode the complete audio NOW (while partial is still playing) to avoid gap
@@ -226,47 +261,88 @@ export async function createProgressiveAudioPlayer(options: ProgressiveAudioOpti
           const decodeTime = Date.now() - decodeStartTime;
           console.log(`[ProgressivePlayer] Continuation decoded in ${decodeTime}ms (${completeAudioBuffer.duration.toFixed(2)}s total audio)`);
 
-          // Now wait for partial to finish
-          console.log(`[ProgressivePlayer] Waiting for partial playback to end...`);
-          await partialEndedPromise;
-          console.log(`[ProgressivePlayer] Partial ended, starting continuation immediately from ${partialDuration.toFixed(2)}s...`);
+          // Check if stopped before continuing
+          if (isStopped) {
+            console.log('[ProgressivePlayer] Playback stopped, skipping continuation');
+            cleanupCurrentSource();
+          } else {
+            // Now wait for partial to finish
+            console.log(`[ProgressivePlayer] Waiting for partial playback to end...`);
+            await partialEndedPromise;
 
-          // Create and play continuation source immediately (audio already decoded!)
-          cleanupCurrentSource();
-          currentSource = context.createBufferSource();
-          currentGainNode = context.createGain();
+            // Check again after waiting
+            if (isStopped) {
+              console.log('[ProgressivePlayer] Playback stopped during partial wait, skipping continuation');
+              cleanupCurrentSource();
+            } else {
+              console.log(`[ProgressivePlayer] Partial ended, starting continuation immediately from ${partialDuration.toFixed(2)}s...`);
 
-          currentSource.buffer = completeAudioBuffer;
-          currentSource.connect(currentGainNode);
-          currentGainNode.connect(context.destination);
+              // Create and play continuation source immediately (audio already decoded!)
+              cleanupCurrentSource();
+              currentSource = context.createBufferSource();
+              currentGainNode = context.createGain();
 
-          currentSource.onended = () => {
-            isCurrentlyPlaying = false;
-            isCurrentlyPaused = false;
-            console.log(`[ProgressivePlayer] ✅ Playback fully completed`);
-          };
+              currentSource.buffer = completeAudioBuffer;
+              currentSource.connect(currentGainNode);
+              currentGainNode.connect(context.destination);
 
-          // Start from where partial left off
-          currentSource.start(0, partialDuration);
-          isCurrentlyPlaying = true;
-          isCurrentlyPaused = false;
-          playbackStartTime = Date.now();
+              // Set up promise to resolve when continuation playback ends
+              const continuationEndedPromise = new Promise<void>((resolve) => {
+                currentSource!.onended = () => {
+                  isCurrentlyPlaying = false;
+                  isCurrentlyPaused = false;
+                  console.log(`[ProgressivePlayer] ✅ Playback fully completed`);
+                  resolve();
+                };
+              });
 
-          console.log(`[ProgressivePlayer] ▶️ Continuation playing (${(completeAudioBuffer.duration - partialDuration).toFixed(2)}s remaining)`);
-        } else {
-          // Play complete audio from beginning
+              // Start from where partial left off
+              currentSource.start(0, partialDuration);
+              isCurrentlyPlaying = true;
+              isCurrentlyPaused = false;
+              playbackStartTime = Date.now();
+
+              console.log(`[ProgressivePlayer] ▶️ Continuation playing (${(completeAudioBuffer.duration - partialDuration).toFixed(2)}s remaining)`);
+
+              // Wait for continuation playback to complete
+              await continuationEndedPromise;
+            }
+          }
+        } else if (!isStopped) {
+          // Play complete audio from beginning (only if not stopped)
           await playRemainingAudio(completeBuffer);
+        } else {
+          console.log('[ProgressivePlayer] Playback stopped, skipping complete audio playback');
+          cleanupCurrentSource();
         }
       } finally {
-        reader.releaseLock();
+        try {
+          reader.releaseLock();
+        } catch (e) {
+          // Lock may already be released
+        }
+        streamReader = null;
       }
     },
 
     stop: () => {
+      console.log('[ProgressivePlayer] Stop called');
+      isStopped = true;
       cleanupCurrentSource();
       isCurrentlyPlaying = false;
       isCurrentlyPaused = false;
       playbackStartTime = null;
+
+      // Cancel stream reader if active
+      if (streamReader) {
+        try {
+          streamReader.cancel();
+          console.log('[ProgressivePlayer] Stream reader cancelled');
+        } catch (e) {
+          // Reader may already be cancelled or released
+        }
+        streamReader = null;
+      }
     },
 
     pause: () => {
