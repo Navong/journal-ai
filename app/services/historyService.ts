@@ -240,10 +240,17 @@ export const historyService = {
 
   // Fetch audio data for a specific entry (on-demand loading - only when user clicks play)
   async fetchEntryAudio(entryId: string): Promise<string | null> {
+    const startTime = performance.now();
     try {
+      log.debug(`[Performance] Starting audio fetch for entry ${entryId}`);
+      const fetchStartTime = performance.now();
+
       const response = await fetch(`/api/history/audio?entryId=${encodeURIComponent(entryId)}`, {
         method: 'GET',
       });
+
+      const fetchEndTime = performance.now();
+      log.debug(`[Performance] Fetch request completed in ${(fetchEndTime - fetchStartTime).toFixed(0)}ms`);
 
       if (!response.ok) {
         if (response.status === 404) {
@@ -258,11 +265,19 @@ export const historyService = {
         throw new Error(`Failed to fetch audio: ${response.status}`);
       }
 
+      const jsonStartTime = performance.now();
       const data = await response.json();
-      log.info(`Successfully fetched audio for entry ${entryId}`);
+      const jsonEndTime = performance.now();
+
+      const totalTime = jsonEndTime - startTime;
+      const audioSize = data.audioData ? data.audioData.length : 0;
+
+      log.info(`[Performance] Audio fetch completed in ${totalTime.toFixed(0)}ms (fetch: ${(fetchEndTime - fetchStartTime).toFixed(0)}ms, JSON parse: ${(jsonEndTime - jsonStartTime).toFixed(0)}ms, size: ${(audioSize / 1024).toFixed(0)}KB)`);
+
       return data.audioData || null;
     } catch (error) {
-      log.error('Failed to fetch audio', {}, error as Error);
+      const totalTime = performance.now() - startTime;
+      log.error(`Failed to fetch audio after ${totalTime.toFixed(0)}ms`, {}, error as Error);
       return null;
     }
   },

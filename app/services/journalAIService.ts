@@ -51,7 +51,7 @@ export const generateSpeechStream = async (text: string): Promise<ReadableStream
       throw new Error(errorBody.message || `HTTP error! status: ${response.status}`);
     }
 
-    return response.body;
+    return response.body || undefined;
   } catch (error) {
     log.error('Error in generateSpeechStream fetch call', {}, error as Error);
     // Return undefined or re-throw, depending on desired error handling

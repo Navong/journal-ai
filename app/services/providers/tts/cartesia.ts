@@ -45,12 +45,15 @@ export class CartesiaTTSProvider implements TTSProvider {
         log.debug(`[TTS API] Starting TTS generation (attempt ${attempt + 1}/${maxRetries})...
 `);
 
+        // Use WAV/PCM for progressive streaming playback
+        // WAV can be decoded chunk-by-chunk, MP3 requires full file
+        // Note: Files are large (~6MB) but streaming from database as binary is fast
         const outputFormat = {
           container: 'wav' as const,
           encoding: 'pcm_f32le' as const, // PCM float32 little-endian - allows progressive decoding
           sampleRate: 44100, // CD quality - matches Cartesia docs recommendation
         };
-        log.debug('[TTS API] Using output format:', outputFormat);
+        log.debug('[TTS API] Using WAV format for progressive streaming:', outputFormat);
 
         const response = await this.client.tts.bytes({
           modelId: 'sonic-2',

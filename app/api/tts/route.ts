@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
         // Return streaming binary response
         return new Response(audioStream, {
             headers: {
-                'Content-Type': 'audio/wav', // Assuming Cartesia provides WAV
+                'Content-Type': 'audio/wav', // WAV audio for progressive decoding
                 'Cache-Control': 'no-cache',
                 'Connection': 'keep-alive',
                 'Transfer-Encoding': 'chunked',

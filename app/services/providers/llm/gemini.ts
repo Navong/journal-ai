@@ -400,7 +400,7 @@ class GeminiChatSession implements ChatSession {
 
   async sendMessage(message: string): Promise<string> {
     try {
-      const response = await this.chat.sendMessage(message);
+      const response = await this.chat.sendMessage({ message });
       return response.text || '';
     } catch (error) {
       log.error('Error sending message in Gemini chat session', {}, error as Error);
@@ -529,7 +529,7 @@ export class GeminiLLMProvider implements LLMProvider {
 
     if (filteredEntries.length === 0) {
       // If no entries meet threshold, use the highest scoring one
-      const highestScoring = scoredEntries.sort((a, b) => bb.score - a.score)[0];
+      const highestScoring = scoredEntries.sort((a, b) => b.score - a.score)[0];
       if (highestScoring) {
         filteredEntries.push(highestScoring);
       }

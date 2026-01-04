@@ -131,7 +131,7 @@ const JournalApp: React.FC = () => {
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isChatting, setIsChatting] = useState(false);
-  const chatSessionRef = useRef<Chat | null>(null);
+  const chatSessionRef = useRef<ChatSession | null>(null);
   const [isSendingChat, setIsSendingChat] = useState(false);
   const [contextRevalidated, setContextRevalidated] = useState(false);
 
@@ -1539,79 +1539,85 @@ const JournalApp: React.FC = () => {
         return;
       }
 
-      // Fetch audio from database on-demand (cross-device sync)
+      // Try to fetch from database (optimized with streaming response)
       // Only fetch if we have a valid entry ID and user is authenticated
       if (entryId && userId && !isDemoMode) {
-        console.log(`[handleHistoryAudioPlayback] Fetching audio from database for entry ${entryId}...`);
+        console.log(`[handleHistoryAudioPlayback] Checking database for cached audio for entry ${entryId}...`);
 
-        // Fetch as streaming audio from the API endpoint
         try {
-          const response = await fetch(`/api/history/audio?entryId=${encodeURIComponent(entryId)}`, {
+          // Fetch with streaming=true to get binary stream instead of JSON
+          const response = await fetch(`/api/history/audio?entryId=${encodeURIComponent(entryId)}&streaming=true`, {
             method: 'GET',
           });
 
           if (response.ok && response.body) {
-            const contentType = response.headers.get('Content-Type');
-            if (contentType && contentType.includes('audio/')) {
-              // Handle streaming response directly
-              setIsGeneratingVoice(false);
-              setGeneratingAudioId(null);
-              playAudio(response.body, id);
-              return;
-            }
+            console.log(`[handleHistoryAudioPlayback] ✅ Got cached audio stream from database, starting playback...`);
+            setIsGeneratingVoice(false);
+            setGeneratingAudioId(null);
+            playAudio(response.body, id);
+            return;
           }
         } catch (fetchError) {
-          console.warn('Streaming fetch failed:', fetchError);
-        }
-
-        // Fallback to base64 response using historyService
-        const dbAudio = await historyService.fetchEntryAudio(entryId);
-        if (dbAudio) {
-          audioData = dbAudio;
-          // Cache locally for faster future access
-          await audioCache.set(text, dbAudio);
-          setIsGeneratingVoice(false);
-          setGeneratingAudioId(null);
-          playAudio(audioData, id);
-          return;
+          console.warn('[handleHistoryAudioPlayback] Database streaming fetch failed:', fetchError);
         }
       }
 
-      // Generate new audio with retry logic for iOS background suspension
-      // Use streaming generation with progressive playback
-      const needsChunking = text.length > 1500;
-      const audioResult = await withRetry(
-        `generate-tts-${id}`,
-        () => generateSpeech(text, {
-          chunked: needsChunking
-        }),
-        3,
-        2000
-      );
+      // Generate new audio with STREAMING for progressive playback (like main reflection)
+      console.log('[handleHistoryAudioPlayback] No cached audio found, generating with streaming...');
+      const streamStartTime = Date.now();
+      const audioStream = await generateSpeechStream(text);
 
-      if (audioResult) {
-        audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
+      if (audioStream) {
+        const fetchTime = Date.now() - streamStartTime;
+        console.log(`[handleHistoryAudioPlayback] ✅ Audio stream received in ${fetchTime}ms, starting progressive playback...`);
 
-        // Cache locally
-        if (typeof audioResult === 'string') {
-          await audioCache.set(text, audioResult);
+        // Clear loading state immediately - playback will start in 2-3 seconds
+        setIsGeneratingVoice(false);
+        setGeneratingAudioId(null);
 
-          // Optimize and sync to database for cross-device access
-          if (userId && !isDemoMode && historyEntry?.id) {
-            historyService.saveEntryAudio(historyEntry.id, audioResult)
-              .then(() => {
-                console.log(`[JournalApp] ✅ Audio saved to database for entry ${historyEntry.id}`);
-              })
-              .catch(saveErr => {
-                console.error('[JournalApp] Failed to save audio to database:', saveErr);
-                // Log error but don't throw - audio is cached locally
-              });
-          }
-        }
+        // Play stream directly for progressive playback (don't await - it runs async)
+        playAudio(audioStream, id);
+        console.log('[handleHistoryAudioPlayback] ✅ Playback initiated (will start in 2-3s as stream buffers)');
 
-        playAudio(audioData, id);
+        // Note: We can't easily cache streaming audio since it's consumed during playback
+        // The cache will be populated next time when we use the generateSpeech fallback
       } else {
-        showToast('Could not generate audio. Please try again.', 'error');
+        // Fallback to old base64 method if streaming not available
+        console.log('[handleHistoryAudioPlayback] Streaming not available, falling back to base64 method...');
+        const needsChunking = text.length > 1500;
+        const audioResult = await withRetry(
+          `generate-tts-${id}`,
+          () => generateSpeech(text, {
+            chunked: needsChunking
+          }),
+          3,
+          2000
+        );
+
+        if (audioResult) {
+          audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
+
+          // Cache locally
+          if (typeof audioResult === 'string') {
+            await audioCache.set(text, audioResult);
+
+            // Optimize and sync to database for cross-device access
+            if (userId && !isDemoMode && historyEntry?.id) {
+              historyService.saveEntryAudio(historyEntry.id, audioResult)
+                .then(() => {
+                  console.log(`[handleHistoryAudioPlayback] ✅ Audio saved to database for entry ${historyEntry.id}`);
+                })
+                .catch(saveErr => {
+                  console.error('[handleHistoryAudioPlayback] Failed to save audio to database:', saveErr);
+                  // Log error but don't throw - audio is cached locally
+                });
+            }
+          }
+
+          playAudio(audioData, id);
+        } else {
+          showToast('Could not generate audio. Please try again.', 'error');
+        }
       }
     } catch (error) {
       console.error('TTS generation error:', error);
@@ -2048,8 +2054,8 @@ const JournalApp: React.FC = () => {
     setIsSendingChat(true);
 
     try {
-      const response = await chatSessionRef.current!.sendMessage({ message: text });
-      const modelText = response.text || "I'm here listening, but I couldn't find the right words just now.";
+      const response = await chatSessionRef.current!.sendMessage(text);
+      const modelText = response || "I'm here listening, but I couldn't find the right words just now.";
       const newModelMsg: ChatMessage = { role: 'model', text: modelText };
 
       const updatedMessagesWithModel = [...updatedMessagesWithUser, newModelMsg];

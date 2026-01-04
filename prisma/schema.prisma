@@ -26,6 +26,7 @@ model JournalEntry {
   @@index([userId])
   @@index([createdAt(sort: Desc)])
   @@index([userId, createdAt(sort: Desc)]) // Composite index for faster user queries with sorting
+  @@index([userId, id]) // Composite index for faster audio fetch queries
   @@map("journal_entries")
 }
 
