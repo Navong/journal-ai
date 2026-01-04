@@ -18,7 +18,7 @@ interface Navigator {
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Reflection, AppStatus, ViewMode, HistoryEntry, Mood, ChatMessage, AudioPlaybackState, ReflectionProgress, TokenUsage, CumulativeTokenUsage } from '../types';
 import { getJournalReflection, startJournalChat, generateSpeechStream } from '../services/journalAIService';
-import { generateSpeech } from '../utils/audioGeneration';
+import { generateSpeech, streamToBase64 } from '../utils/audioGeneration';
 import { ReflectionCard } from './ReflectionCard';
 import { HistoryView } from './HistoryView';
 import { ChatInterface } from './ChatInterface';
@@ -1435,12 +1435,35 @@ const JournalApp: React.FC = () => {
               setIsGeneratingVoice(false);
               setGeneratingAudioId(null);
 
+              // Split stream: one for playback, one for caching
+              const [playStream, cacheStream] = audioStream.tee();
+
               // Play stream directly for progressive playback (don't await - it runs async)
-              playAudio(audioStream, 'main');
+              playAudio(playStream, 'main');
               console.log('[JournalApp] ✅ Playback initiated (will start in 2-3s as stream buffers)');
 
-              // Note: We can't easily cache streaming audio since it's consumed during playback
-              // The cache will be populated next time when we use the generateSpeech fallback
+              // Cache the audio in the background (don't await - let it run async)
+              streamToBase64(cacheStream).then(base64Audio => {
+                // Save to IndexedDB for fast playback
+                audioCache.set(reflection.content, base64Audio).then(() => {
+                  console.log('[JournalApp] ✅ Audio cached in IndexedDB');
+
+                  // Also save to database for cross-device access
+                  if (userId && !isDemoMode && currentHistoryId) {
+                    historyService.saveEntryAudio(currentHistoryId, base64Audio)
+                      .then(() => {
+                        console.log(`[JournalApp] ✅ Audio saved to database for entry ${currentHistoryId}`);
+                      })
+                      .catch(saveErr => {
+                        console.error('[JournalApp] Failed to save audio to database:', saveErr);
+                      });
+                  }
+                }).catch(error => {
+                  console.warn('[JournalApp] Failed to cache audio:', error);
+                });
+              }).catch(error => {
+                console.warn('[JournalApp] Failed to convert stream to base64 for caching:', error);
+              });
             } else {
               // Fallback to old method if streaming not available
               console.log('[JournalApp] Streaming not available, falling back to base64 method...');
@@ -1554,7 +1577,24 @@ const JournalApp: React.FC = () => {
             console.log(`[handleHistoryAudioPlayback] ✅ Got cached audio stream from database, starting playback...`);
             setIsGeneratingVoice(false);
             setGeneratingAudioId(null);
-            playAudio(response.body, id);
+
+            // Split stream: one for playback, one for caching
+            const [playStream, cacheStream] = response.body.tee();
+
+            // Play stream directly for progressive playback
+            playAudio(playStream, id);
+
+            // Cache the audio locally for faster future access (don't await - let it run async)
+            streamToBase64(cacheStream).then(base64Audio => {
+              audioCache.set(text, base64Audio).then(() => {
+                console.log('[handleHistoryAudioPlayback] ✅ Database audio cached in IndexedDB');
+              }).catch(error => {
+                console.warn('[handleHistoryAudioPlayback] Failed to cache database audio:', error);
+              });
+            }).catch(error => {
+              console.warn('[handleHistoryAudioPlayback] Failed to convert database stream to base64 for caching:', error);
+            });
+
             return;
           }
         } catch (fetchError) {
@@ -1575,12 +1615,35 @@ const JournalApp: React.FC = () => {
         setIsGeneratingVoice(false);
         setGeneratingAudioId(null);
 
+        // Split stream: one for playback, one for caching
+        const [playStream, cacheStream] = audioStream.tee();
+
         // Play stream directly for progressive playback (don't await - it runs async)
-        playAudio(audioStream, id);
+        playAudio(playStream, id);
         console.log('[handleHistoryAudioPlayback] ✅ Playback initiated (will start in 2-3s as stream buffers)');
 
-        // Note: We can't easily cache streaming audio since it's consumed during playback
-        // The cache will be populated next time when we use the generateSpeech fallback
+        // Cache the audio in the background (don't await - let it run async)
+        streamToBase64(cacheStream).then(base64Audio => {
+          // Save to IndexedDB for fast playback
+          audioCache.set(text, base64Audio).then(() => {
+            console.log('[handleHistoryAudioPlayback] ✅ Audio cached in IndexedDB');
+
+            // Also save to database for cross-device access
+            if (userId && !isDemoMode && historyEntry?.id) {
+              historyService.saveEntryAudio(historyEntry.id, base64Audio)
+                .then(() => {
+                  console.log(`[handleHistoryAudioPlayback] ✅ Audio saved to database for entry ${historyEntry.id}`);
+                })
+                .catch(saveErr => {
+                  console.error('[handleHistoryAudioPlayback] Failed to save audio to database:', saveErr);
+                });
+            }
+          }).catch(error => {
+            console.warn('[handleHistoryAudioPlayback] Failed to cache audio:', error);
+          });
+        }).catch(error => {
+          console.warn('[handleHistoryAudioPlayback] Failed to convert stream to base64 for caching:', error);
+        });
       } else {
         // Fallback to old base64 method if streaming not available
         console.log('[handleHistoryAudioPlayback] Streaming not available, falling back to base64 method...');
@@ -1889,12 +1952,35 @@ const JournalApp: React.FC = () => {
                 setIsGeneratingVoice(false);
                 setGeneratingAudioId(null);
 
+                // Split stream: one for playback, one for caching
+                const [playStream, cacheStream] = audioStream.tee();
+
                 // Play stream directly for progressive playback
-                playAudio(audioStream, 'main');
+                playAudio(playStream, 'main');
                 console.log('[JournalApp] Auto-play: Playback initiated (will start in 2-3s)');
 
-                // Note: Streaming audio can't be easily cached since it's consumed during playback
-                // On next play, we'll fall back to generateSpeech which will cache it
+                // Cache the audio in the background (don't await - let it run async)
+                streamToBase64(cacheStream).then(base64Audio => {
+                  // Save to IndexedDB for fast playback
+                  audioCache.set(content, base64Audio).then(() => {
+                    console.log('[JournalApp] ✅ Auto-play audio cached in IndexedDB');
+
+                    // Also save to database for cross-device access
+                    if (userId && !isDemoMode && newId) {
+                      historyService.saveEntryAudio(newId, base64Audio)
+                        .then(() => {
+                          console.log(`[JournalApp] ✅ Auto-play audio saved to database for entry ${newId}`);
+                        })
+                        .catch(saveErr => {
+                          console.error('[JournalApp] Failed to save auto-play audio to database:', saveErr);
+                        });
+                    }
+                  }).catch(error => {
+                    console.warn('[JournalApp] Failed to cache auto-play audio:', error);
+                  });
+                }).catch(error => {
+                  console.warn('[JournalApp] Failed to convert auto-play stream to base64 for caching:', error);
+                });
               } else {
                 // Fallback to old method if streaming not available
                 console.log('[JournalApp] Auto-play: Streaming not available, falling back to base64...');
@@ -1930,47 +2016,47 @@ const JournalApp: React.FC = () => {
                 // Start sync immediately without waiting - fire and forget
                 // This ensures audio syncs to cloud right after TTS generation finishes, not after playback
                 if (userId && !isDemoMode && newId && audioResult && typeof audioResult === 'string') {
-              console.log(`[JournalApp] Starting immediate audio sync to database for entry ${newId}`);
+                  console.log(`[JournalApp] Starting immediate audio sync to database for entry ${newId}`);
 
-              // Start optimization and save immediately (don't await - fire and forget)
-              // Check existence in parallel, but start saving anyway
-              Promise.all([
-                historyService.checkEntryAudioExists(newId).catch(() => false),
-                optimizeAudio(audioResult).catch(() => null)
-              ]).then(([audioExists, optimized]) => {
-                if (audioExists) {
-                  console.log(`[JournalApp] Audio already exists in database for entry ${newId}`);
-                  return;
-                }
+                  // Start optimization and save immediately (don't await - fire and forget)
+                  // Check existence in parallel, but start saving anyway
+                  Promise.all([
+                    historyService.checkEntryAudioExists(newId).catch(() => false),
+                    optimizeAudio(audioResult).catch(() => null)
+                  ]).then(([audioExists, optimized]) => {
+                    if (audioExists) {
+                      console.log(`[JournalApp] Audio already exists in database for entry ${newId}`);
+                      return;
+                    }
 
-                // Validate optimized audio before using it
-                const MIN_VALID_AUDIO_LENGTH = 1000;
-                const isValidOptimized = optimized &&
-                  typeof optimized === 'string' &&
-                  optimized.length >= MIN_VALID_AUDIO_LENGTH;
+                    // Validate optimized audio before using it
+                    const MIN_VALID_AUDIO_LENGTH = 1000;
+                    const isValidOptimized = optimized &&
+                      typeof optimized === 'string' &&
+                      optimized.length >= MIN_VALID_AUDIO_LENGTH;
 
-                // Save optimized version if valid, otherwise save original
-                const audioToSave = isValidOptimized ? optimized : audioResult;
-                if (!isValidOptimized && optimized) {
-                  console.warn(`[JournalApp] Optimized audio invalid (length: ${optimized?.length}), using original`);
-                }
+                    // Save optimized version if valid, otherwise save original
+                    const audioToSave = isValidOptimized ? optimized : audioResult;
+                    if (!isValidOptimized && optimized) {
+                      console.warn(`[JournalApp] Optimized audio invalid (length: ${optimized?.length}), using original`);
+                    }
 
-                historyService.saveEntryAudio(newId, audioToSave)
-                  .then(() => {
-                    console.log(`[JournalApp] ✅ Audio saved to database for entry ${newId}`);
-                  })
-                  .catch(err => {
-                    console.warn('[JournalApp] Failed to save audio to database:', err);
+                    historyService.saveEntryAudio(newId, audioToSave)
+                      .then(() => {
+                        console.log(`[JournalApp] ✅ Audio saved to database for entry ${newId}`);
+                      })
+                      .catch(err => {
+                        console.warn('[JournalApp] Failed to save audio to database:', err);
+                      });
+                  }).catch(err => {
+                    console.warn('[JournalApp] Error during audio sync setup, trying direct save:', err);
+                    // Fallback: try saving original directly
+                    historyService.saveEntryAudio(newId, audioResult)
+                      .then(() => {
+                        console.log(`[JournalApp] ✅ Audio saved to database (fallback) for entry ${newId}`);
+                      })
+                      .catch(() => { });
                   });
-              }).catch(err => {
-                console.warn('[JournalApp] Error during audio sync setup, trying direct save:', err);
-                // Fallback: try saving original directly
-                historyService.saveEntryAudio(newId, audioResult)
-                  .then(() => {
-                    console.log(`[JournalApp] ✅ Audio saved to database (fallback) for entry ${newId}`);
-                  })
-                  .catch(() => { });
-              });
 
                   // Note: We don't await - this runs in background so audio can play immediately
                 }

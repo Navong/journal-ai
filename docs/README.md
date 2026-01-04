@@ -12,6 +12,7 @@ Welcome to the Serenity Journal documentation. This folder contains all technica
 ## Performance Optimization
 
 - **[Database Audio Fetch](performance/database-audio-fetch.md)** - Optimizing database audio retrieval (21s → 1.4s)
+- **[Audio Compression](performance/audio-compression.md)** - Gzip compression for 77% size reduction (6MB → 1.5MB)
 - **[TTS Improvements](performance/tts-improvements.md)** - Text-to-speech API optimizations
 - **[Streaming Migration](performance/streaming-migration.md)** - Migration from base64 chunks to progressive streaming
 

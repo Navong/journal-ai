@@ -38,11 +38,11 @@ export async function createProgressiveAudioPlayer(options: ProgressiveAudioOpti
     if (!audioContext) {
       audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate });
     }
-    
+
     if (audioContext.state === 'suspended') {
       await audioContext.resume();
     }
-    
+
     return audioContext;
   };
 
@@ -58,7 +58,7 @@ export async function createProgressiveAudioPlayer(options: ProgressiveAudioOpti
       }
       currentSource = null;
     }
-    
+
     if (currentGainNode) {
       currentGainNode.disconnect();
       currentGainNode = null;
@@ -68,20 +68,20 @@ export async function createProgressiveAudioPlayer(options: ProgressiveAudioOpti
   // Decode and play partial audio
   const playPartialAudio = async (partialBuffer: Uint8Array): Promise<number> => {
     const context = await initAudioContext();
-    
+
     // Create audio buffer from partial data
     const audioBuffer = await context.decodeAudioData(partialBuffer.buffer.slice(0) as ArrayBuffer);
     partialDuration = audioBuffer.duration;
-    
+
     // Create audio source and connect to output
     cleanupCurrentSource();
     currentSource = context.createBufferSource();
     currentGainNode = context.createGain();
-    
+
     currentSource.buffer = audioBuffer;
     currentSource.connect(currentGainNode);
     currentGainNode.connect(context.destination);
-    
+
     // Set up promise to resolve when partial playback ends
     partialEndedPromise = new Promise<void>((resolve) => {
       currentSource!.onended = () => {
@@ -90,38 +90,38 @@ export async function createProgressiveAudioPlayer(options: ProgressiveAudioOpti
         resolve();
       };
     });
-    
+
     // Start playback
     currentSource.start(0);
     isCurrentlyPlaying = true;
     isCurrentlyPaused = false;
     playbackStartTime = Date.now();
-    
+
     return partialDuration;
   };
 
   // Play remaining audio from where partial left off
   const playRemainingAudio = async (completeBuffer: Uint8Array, skipTo: number = 0) => {
     const context = await initAudioContext();
-    
+
     // Create complete audio buffer
     const audioBuffer = await context.decodeAudioData(completeBuffer.buffer.slice(0) as ArrayBuffer);
-    
+
     // Create new source for complete audio
     cleanupCurrentSource();
     currentSource = context.createBufferSource();
     currentGainNode = context.createGain();
-    
+
     currentSource.buffer = audioBuffer;
     currentSource.connect(currentGainNode);
     currentGainNode.connect(context.destination);
-    
+
     // Set up completion handler
     currentSource.onended = () => {
       isCurrentlyPlaying = false;
       isCurrentlyPaused = false;
     };
-    
+
     // Start from specified position
     currentSource.start(0, skipTo);
     isCurrentlyPlaying = true;
@@ -293,7 +293,7 @@ export async function createProgressiveAudioPlayer(options: ProgressiveAudioOpti
  */
 export async function playProgressiveAudioFromUrl(url: string, options: ProgressiveAudioOptions = {}): Promise<void> {
   const response = await fetch(url);
-  
+
   if (!response.ok || !response.body) {
     throw new Error(`Failed to fetch audio: ${response.status} ${response.statusText}`);
   }

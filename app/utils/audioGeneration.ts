@@ -68,7 +68,7 @@ function chunkTextForTTS(text: string, maxLength: number = 1500): string[] {
 }
 
 // Helper to convert ReadableStream<Uint8Array> to base64 string
-async function streamToBase64(stream: ReadableStream<Uint8Array>): Promise<string> {
+export async function streamToBase64(stream: ReadableStream<Uint8Array>): Promise<string> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let totalLength = 0;

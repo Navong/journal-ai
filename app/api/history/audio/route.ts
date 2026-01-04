@@ -130,11 +130,6 @@ export async function GET(request: NextRequest) {
       console.log(`[API] [Performance] ✅ Audio streaming completed in ${totalTime}ms (query: ${queryEndTime - queryStartTime}ms, decode: ${decodeEndTime - decodeStartTime}ms, size: ${(audioSize / 1024).toFixed(0)}KB → ${(bytes.length / 1024).toFixed(0)}KB binary)`);
 
       // Return as binary stream (WAV format for progressive decoding)
-      // This is MUCH faster than returning 6MB as JSON:
-      // - No JSON serialization overhead (~1-2s saved)
-      // - No JSON parsing overhead on client (~1.5s saved)
-      // - Binary transfer is more efficient
-      // Total speedup: 21s → ~5-10s (still slow due to 6MB size, but much better)
       return new Response(bytes, {
         headers: {
           'Content-Type': 'audio/wav', // WAV audio (allows progressive decoding)
@@ -274,13 +269,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
-    // Update audio data (use cleaned version)
+    // Save audio data to database
     await prisma.journalEntry.update({
       where: { id: entryId },
       data: { audioData: cleanedAudioData },
     });
 
-    console.log(`[API] ✅ Saved audio for entry ${entryId} (user: ${userId}, size: ${cleanedAudioData.length} chars, ~${Math.round(cleanedAudioData.length * 0.75 / 1024)}KB)`);
+    const audioSize = (cleanedAudioData.length / 1024).toFixed(1);
+    console.log(`[API] ✅ Saved audio for entry ${entryId} (user: ${userId}, size: ${audioSize}KB)`);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error('[API] Failed to save audio:', error);
