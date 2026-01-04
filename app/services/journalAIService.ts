@@ -1,14 +1,12 @@
 import { HistoryEntry, Mood, ExtractedEntities, Highlight, ReflectionProgressCallback, TokenUsage } from "../types";
 import logger from "../utils/logger";
 import { getLLMProvider } from './providers/llm';
-import { getTTSProvider } from './providers/tts';
 import { ChatSession } from "./providers/llm/interface";
 
 const log = logger.module('JournalAIService');
 
 // Initialize providers
 const llmProvider = getLLMProvider();
-const ttsProvider = getTTSProvider();
 
 // The following functions will now delegate to the LLMProvider
 export const detectMood = async (entry: string): Promise<Mood> => {
@@ -38,9 +36,27 @@ export const detectTopic = async (entry: string): Promise<string | undefined> =>
   return llmProvider.detectTopic(entry);
 };
 
-// The TTS functions will delegate to the TTSProvider
+// The TTS function now delegates to the server-side API route
 export const generateSpeechStream = async (text: string): Promise<ReadableStream<Uint8Array> | undefined> => {
-  return ttsProvider.generateSpeechStream(text);
+  try {
+    const response = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({ message: 'Failed to generate speech stream with no error body.' }));
+      log.error('Failed to generate speech stream', { status: response.status, error: errorBody });
+      throw new Error(errorBody.message || `HTTP error! status: ${response.status}`);
+    }
+
+    return response.body;
+  } catch (error) {
+    log.error('Error in generateSpeechStream fetch call', {}, error as Error);
+    // Return undefined or re-throw, depending on desired error handling
+    return undefined;
+  }
 };
 
 // The old generateSpeech function (which handled caching and chunking) has been removed.

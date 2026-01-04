@@ -796,7 +796,7 @@ Identify the mood:`
 
     // Dynamic context sizing based on entry length
     const entryTokens = estimateTokens(entry);
-    const adjustedMaxTokens = entryLength > 500
+    const adjustedMaxTokens = entryTokens > 500
       ? MAX_CONTEXT_TOKENS_REFLECTION - 300 // Reduce context for long entries
       : MAX_CONTEXT_TOKENS_REFLECTION;
 
