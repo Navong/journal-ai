@@ -17,11 +17,12 @@ interface Navigator {
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Reflection, AppStatus, ViewMode, HistoryEntry, Mood, ChatMessage, AudioPlaybackState, ReflectionProgress, TokenUsage, CumulativeTokenUsage } from '../types';
-import { getJournalReflection, startJournalChat, generateSpeech, generateSpeechStream } from '../services/geminiService';
+import { getJournalReflection, startJournalChat, generateSpeechStream } from '../services/journalAIService';
+import { generateSpeech } from '../utils/audioGeneration';
 import { ReflectionCard } from './ReflectionCard';
 import { HistoryView } from './HistoryView';
 import { ChatInterface } from './ChatInterface';
-import { Chat } from '@google/genai';
+import { ChatSession } from '../services/providers/llm/interface';
 import { audioCache } from '../utils/audioCache';
 import { showToast, ToastContainer } from '../utils/toast';
 import { generateUUID } from '../utils/uuid';
