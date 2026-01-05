@@ -21,6 +21,11 @@ import { getJournalReflection, startJournalChat, generateSpeech } from '../servi
 import { ReflectionCard } from './ReflectionCard';
 import { HistoryView } from './HistoryView';
 import { ChatInterface } from './ChatInterface';
+import { TodayView } from './TodayView';
+import { StoryView } from './StoryView';
+import { MapView } from './MapView';
+import { ProView } from './ProView';
+import { BottomNavigation } from './BottomNavigation';
 import { Chat } from '@google/genai';
 import { audioCache } from '../utils/audioCache';
 import { showToast, ToastContainer } from '../utils/toast';
@@ -117,7 +122,7 @@ async function decodeAudioData(
 const JournalApp: React.FC = () => {
   const { data: session, status: authStatus } = useSession();
   const [isDemoMode, setIsDemoMode] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.JOURNAL);
+  const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.TODAY);
 
   // Check for demo mode - should not be active if user is authenticated
   useEffect(() => {
@@ -2335,8 +2340,28 @@ const JournalApp: React.FC = () => {
         </div>
       )}
 
-      <header className="mb-6 md:mb-12 text-center md:text-left flex flex-col md:flex-row md:items-end md:justify-between border-b border-stone-100 pb-4 md:pb-8">
-        <div>
+      <header className="mb-0 md:mb-12 text-center md:text-left flex flex-col md:flex-row md:items-end md:justify-between md:border-b border-stone-100 pb-4 md:pb-8 px-6 py-4 md:px-0 md:py-0">
+        {/* Mobile Header */}
+        <div className="flex md:hidden items-center justify-between w-full mb-4">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 bg-indigo-500 rounded-full"></span>
+            <span className="text-xs font-medium text-stone-500 uppercase tracking-wider">Memory Active</span>
+          </div>
+          {session?.user && (
+            <div className="w-10 h-10 bg-stone-200 rounded-full overflow-hidden">
+              {session.user.image ? (
+                <img src={session.user.image} alt="Profile" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-stone-500 text-sm font-medium">
+                  {session.user.email?.charAt(0).toUpperCase()}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Desktop Header */}
+        <div className="hidden md:block">
           <h1 className="text-xl md:text-4xl font-light text-stone-800 tracking-tight font-serif mb-0.5 md:mb-2">
             Serenity Journal
           </h1>
@@ -2345,7 +2370,7 @@ const JournalApp: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex flex-col items-center md:items-end mt-4 md:mt-0 gap-2 md:gap-3">
+        <div className="hidden md:flex flex-col items-center md:items-end mt-4 md:mt-0 gap-2 md:gap-3">
           <div className="flex flex-wrap justify-center md:justify-end items-center gap-2 md:gap-4">
             {(isPlayingAudio || isGeneratingVoice) && (
               <span className="flex items-center gap-1.5 text-[9px] md:text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 md:py-1 rounded-full uppercase tracking-widest font-bold border border-emerald-100">
@@ -2439,9 +2464,30 @@ const JournalApp: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex-grow flex flex-col">
-        {viewMode === ViewMode.JOURNAL ? (
-          <div key={sessionKey} className="relative flex-grow flex flex-col animate-in fade-in duration-500">
+      <main className="flex-grow flex flex-col overflow-hidden">
+        {viewMode === ViewMode.TODAY ? (
+          <TodayView
+            currentChapter={reflection?.topic || ''}
+            narrative={reflection?.summary || ''}
+            selectedMood={selectedMood}
+            onMoodSelect={setSelectedMood}
+            onContinueStory={() => setViewMode(ViewMode.JOURNAL)}
+          />
+        ) : viewMode === ViewMode.STORY ? (
+          <StoryView
+            history={history}
+            onPlayAudio={handleHistoryAudioPlayback}
+            onDeleteEntry={deleteHistoryEntry}
+          />
+        ) : viewMode === ViewMode.MAP ? (
+          <MapView
+            currentChapter={reflection?.topic || ''}
+            narrative={reflection?.summary || ''}
+          />
+        ) : viewMode === ViewMode.PRO ? (
+          <ProView />
+        ) : viewMode === ViewMode.JOURNAL ? (
+          <div key={sessionKey} className="relative flex-grow flex flex-col animate-in fade-in duration-500 px-6 py-6">
             <div className="relative flex flex-col flex-grow">
               <textarea
                 ref={textareaRef}
@@ -2730,25 +2776,34 @@ const JournalApp: React.FC = () => {
               />
             )}
           </div>
-        ) : (
-          <HistoryView
-            history={history}
-            onBack={() => setViewMode(ViewMode.JOURNAL)}
-            onDeleteEntry={deleteHistoryEntry}
-            onClearAll={clearAllHistory}
-            onPlayAudio={handleHistoryAudioPlayback}
-            onPauseAudio={pauseCurrentAudio}
-            onStopAudio={stopCurrentAudio}
-            activeAudioId={activeAudioId}
-            isPlaying={isPlayingAudio}
-            isPaused={isPaused}
-            isGeneratingVoice={isGeneratingVoice}
-            generatingAudioId={generatingAudioId}
-          />
-        )}
+        ) : viewMode === ViewMode.HISTORY ? (
+          <div className="px-6 py-6 overflow-y-auto pb-20">
+            <HistoryView
+              history={history}
+              onBack={() => setViewMode(ViewMode.TODAY)}
+              onDeleteEntry={deleteHistoryEntry}
+              onClearAll={clearAllHistory}
+              onPlayAudio={handleHistoryAudioPlayback}
+              onPauseAudio={pauseCurrentAudio}
+              onStopAudio={stopCurrentAudio}
+              activeAudioId={activeAudioId}
+              isPlaying={isPlayingAudio}
+              isPaused={isPaused}
+              isGeneratingVoice={isGeneratingVoice}
+              generatingAudioId={generatingAudioId}
+            />
+          </div>
+        ) : null}
       </main>
 
-      <footer className="mt-12 md:mt-16 py-6 md:py-8 border-t border-stone-100 flex flex-col md:flex-row justify-between items-center text-stone-400 text-[10px] md:text-xs tracking-widest uppercase gap-4">
+      {/* Bottom Navigation - Mobile Only */}
+      <BottomNavigation
+        currentView={viewMode}
+        onViewChange={setViewMode}
+        onNewEntry={() => setViewMode(ViewMode.JOURNAL)}
+      />
+
+      <footer className="hidden md:flex mt-12 md:mt-16 py-6 md:py-8 border-t border-stone-100 flex-col md:flex-row justify-between items-center text-stone-400 text-[10px] md:text-xs tracking-widest uppercase gap-4">
         <div className="text-center md:text-left leading-relaxed">
           Your thoughts are private and safe. <br />
           <span className="opacity-60 lowercase font-normal italic">A companion, not professional care.</span>

@@ -66,6 +66,10 @@ export enum AppStatus {
 }
 
 export enum ViewMode {
+  TODAY = 'TODAY',
+  STORY = 'STORY',
+  MAP = 'MAP',
+  PRO = 'PRO',
   JOURNAL = 'JOURNAL',
   HISTORY = 'HISTORY'
 }
