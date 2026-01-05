@@ -5,7 +5,7 @@ import { HistoryEntry, Mood } from '../types';
 
 interface StoryViewProps {
   history: HistoryEntry[];
-  onPlayAudio?: (entryId: string) => void;
+  onPlayAudio?: (text: string, entryId: string) => void;
   onDeleteEntry?: (entryId: string) => void;
 }
 
@@ -103,7 +103,7 @@ export function StoryView({ history, onPlayAudio, onDeleteEntry }: StoryViewProp
                           </div>
                           {onPlayAudio && (
                             <button
-                              onClick={() => onPlayAudio(entry.id)}
+                              onClick={() => onPlayAudio(entry.reflection, entry.id)}
                               className="text-indigo-600 hover:text-indigo-700 transition-colors touch-manipulation"
                               aria-label="Play audio reflection"
                             >
