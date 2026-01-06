@@ -37,11 +37,15 @@ export const detectTopic = async (entry: string): Promise<string | undefined> =>
 };
 
 // The TTS function now delegates to the server-side API route
-export const generateSpeechStream = async (text: string, entryId?: string): Promise<ReadableStream<Uint8Array> | undefined> => {
+// Returns full Response object for AudioStreamPlayer
+export const generateSpeechStream = async (text: string, entryId?: string, mood?: Mood): Promise<Response | undefined> => {
   try {
-    const requestBody: { text: string; entryId?: string } = { text };
+    const requestBody: { text: string; entryId?: string; mood?: Mood } = { text };
     if (entryId) {
       requestBody.entryId = entryId;
+    }
+    if (mood) {
+      requestBody.mood = mood;
     }
 
     const response = await fetch('/api/tts', {
@@ -56,7 +60,7 @@ export const generateSpeechStream = async (text: string, entryId?: string): Prom
       throw new Error(errorBody.message || `HTTP error! status: ${response.status}`);
     }
 
-    return response.body || undefined;
+    return response;
   } catch (error) {
     log.error('Error in generateSpeechStream fetch call', {}, error as Error);
     // Return undefined or re-throw, depending on desired error handling

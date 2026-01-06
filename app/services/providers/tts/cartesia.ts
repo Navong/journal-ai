@@ -45,15 +45,15 @@ export class CartesiaTTSProvider implements TTSProvider {
         log.debug(`[TTS API] Starting TTS generation (attempt ${attempt + 1}/${maxRetries})...
 `);
 
-        // Use WAV/PCM for progressive streaming playback
-        // WAV can be decoded chunk-by-chunk, MP3 requires full file
-        // Note: Files are large (~6MB) but streaming from database as binary is fast
+        // Use MP3 for smaller file size (compressed format)
+        // Cartesia may return MP3 as a complete buffer, so we'll chunk it manually for progressive streaming
+        // Documentation: https://docs.cartesia.ai/api-reference/tts/bytes#mp3outputformat
         const outputFormat = {
-          container: 'wav' as const,
-          encoding: 'pcm_f32le' as const, // PCM float32 little-endian - allows progressive decoding
-          sampleRate: 44100, // CD quality - matches Cartesia docs recommendation
+          container: 'raw' as const,
+          sampleRate: 44100, // CD quality - matches Cartesia docs recommendation (in Hz)
+          encoding: 'pcm_s16le' as const,
         };
-        log.debug('[TTS API] Using WAV format for progressive streaming:', outputFormat);
+        log.debug('[TTS API] Using MP3 format for smaller file size:', outputFormat);
 
         const response = await this.client.tts.bytes({
           modelId: 'sonic-2',
@@ -84,12 +84,25 @@ export class CartesiaTTSProvider implements TTSProvider {
               // Helper to get stream reader from Cartesia response
               const getStreamReader = (): ReadableStreamDefaultReader<Uint8Array> => {
                 if (response instanceof ArrayBuffer || response instanceof Uint8Array) {
-                  // Direct buffer - wrap in a simple stream
-                  const buffer = response instanceof ArrayBuffer ? response : new Uint8Array(response).buffer;
+                  // Direct buffer - chunk it manually for progressive streaming
+                  // This is important for MP3 format which may come as a single buffer
+                  const buffer = response instanceof ArrayBuffer ? new Uint8Array(response) : new Uint8Array(response);
+                  const CHUNK_SIZE = 8 * 1024; // 8KB chunks for better progressive streaming (smaller = faster start)
                   const stream = new ReadableStream({
                     start(ctrl) {
-                      ctrl.enqueue(new Uint8Array(buffer));
-                      ctrl.close();
+                      let offset = 0;
+                      const sendChunk = () => {
+                        if (offset < buffer.length) {
+                          const chunk = buffer.slice(offset, Math.min(offset + CHUNK_SIZE, buffer.length));
+                          ctrl.enqueue(chunk);
+                          offset += CHUNK_SIZE;
+                          // Use setTimeout to allow other operations between chunks
+                          setTimeout(sendChunk, 0);
+                        } else {
+                          ctrl.close();
+                        }
+                      };
+                      sendChunk();
                     }
                   });
                   return stream.getReader();

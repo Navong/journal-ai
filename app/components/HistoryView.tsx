@@ -14,10 +14,8 @@ interface HistoryViewProps {
   onDeleteEntry?: (id: string) => void;
   onClearAll?: () => void;
   onPlayAudio?: (text: string, id: string) => void;
-  onPauseAudio?: () => void;
   activeAudioId?: string | number | null;
   isPlaying?: boolean;
-  isPaused?: boolean;
   isGeneratingVoice?: boolean;
   generatingAudioId?: string | number | null;
 }
@@ -30,10 +28,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onDeleteEntry,
   onClearAll,
   onPlayAudio,
-  onPauseAudio,
   activeAudioId,
   isPlaying = false,
-  isPaused = false,
   isGeneratingVoice = false,
   generatingAudioId
 }) => {
@@ -300,18 +296,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     highlights={item.highlights}
                   />
                   {/* Audio Playback Buttons */}
-                  {(onPlayAudio || onPauseAudio) && (
+                  {onPlayAudio && (
                     <div className="mt-3 md:mt-4 flex justify-end">
                       {(() => {
                         const audioId = `history-${item.id}`;
                         const isThisAudioActive = isPlaying && activeAudioId === audioId;
-                        const isThisAudioPaused = isPaused && activeAudioId === audioId;
                         const isThisGenerating = isGeneratingVoice && generatingAudioId === audioId;
 
                         return (
                           <button
                             onClick={() => {
-                              if (isThisAudioActive && !isThisAudioPaused) {
+                              if (isThisAudioActive) {
                                 onPlayAudio?.('', audioId); // Call with empty text to trigger stop
                               } else {
                                 onPlayAudio?.(item.reflection, audioId);
@@ -329,7 +324,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                                 : 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100 hover:scale-105'
                               }
                             `}
-                            title={isThisGenerating ? "Generating..." : (isThisAudioActive && !isThisAudioPaused ? "Stop" : "Play")}
+                            title={isThisGenerating ? "Generating..." : (isThisAudioActive ? "Stop" : "Play")}
                           >
                             {isThisGenerating ? (
                               <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
@@ -339,30 +334,30 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                             ) : (
                               <div className="relative w-4 h-4">
                                 {/* Play Icon */}
-                                <svg 
-                                  xmlns="http://www.w3.org/2000/svg" 
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
                                   className={`absolute inset-0 h-4 w-4 transition-all duration-300 ease-in-out ${
-                                    isThisAudioActive && !isThisAudioPaused 
-                                      ? 'opacity-0 scale-0 rotate-90' 
+                                    isThisAudioActive
+                                      ? 'opacity-0 scale-0 rotate-90'
                                       : 'opacity-100 scale-100 rotate-0'
                                   }`}
-                                  fill="none" 
-                                  viewBox="0 0 24 24" 
+                                  fill="none"
+                                  viewBox="0 0 24 24"
                                   stroke="currentColor"
                                 >
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                 </svg>
                                 {/* Stop Icon */}
-                                <svg 
-                                  xmlns="http://www.w3.org/2000/svg" 
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
                                   className={`absolute inset-0 h-4 w-4 transition-all duration-300 ease-in-out ${
-                                    isThisAudioActive && !isThisAudioPaused 
-                                      ? 'opacity-100 scale-100 rotate-0' 
+                                    isThisAudioActive
+                                      ? 'opacity-100 scale-100 rotate-0'
                                       : 'opacity-0 scale-0 -rotate-90'
                                   }`}
-                                  fill="none" 
-                                  viewBox="0 0 24 24" 
+                                  fill="none"
+                                  viewBox="0 0 24 24"
                                   stroke="currentColor"
                                 >
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />

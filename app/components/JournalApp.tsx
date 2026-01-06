@@ -31,7 +31,7 @@ import { useSession, signOut } from 'next-auth/react';
 import { historyService } from '../services/historyService';
 import { optimizeAudio } from '../utils/audioOptimization';
 import { syncAudioToDatabase, getSyncStats, shouldRunSync, getSyncState, AudioSyncProgress, SYNC_INTERVAL } from '../utils/audioSync';
-import { createProgressiveAudioPlayer } from '../utils/audioStreaming';
+import { AudioStreamPlayer, AudioFormat } from '../utils/audioStreamPlayer';
 
 // Generate user-scoped keys to prevent data leakage between users
 const getHistoryKey = (userId: string | null, isDemo: boolean) => {
@@ -106,12 +106,14 @@ const JournalApp: React.FC = () => {
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // AudioStreamPlayer ref for Response-based streaming
+  const audioPlayerRef = useRef<AudioStreamPlayer | null>(null);
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1.0);
+
+  // Legacy refs for backward compatibility with base64 audio
   const audioContextRef = useRef<AudioContext | null>(null);
   const currentAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const progressivePlayerRef = useRef<Awaited<ReturnType<typeof createProgressiveAudioPlayer>> | null>(null);
-  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const [playbackRate, setPlaybackRate] = useState(1.0);
   const [currentAudioBase64, setCurrentAudioBase64] = useState<string | string[] | null>(null);
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
   const [autoPlayEnabled, setAutoPlayEnabled] = useState<boolean>(false); // Default to false until preferences load
@@ -824,16 +826,17 @@ const JournalApp: React.FC = () => {
     shouldContinuePlayingRef.current = false;
     currentPlaybackIdRef.current = null;
 
-    // Stop progressive audio player if active
-    if (progressivePlayerRef.current) {
+    // Stop AudioStreamPlayer if active
+    if (audioPlayerRef.current) {
       try {
-        progressivePlayerRef.current.stop();
+        audioPlayerRef.current.stop();
       } catch (e) {
-        console.error('Error stopping progressive player:', e);
+        console.error('Error stopping audio player:', e);
       }
-      progressivePlayerRef.current = null;
+      audioPlayerRef.current = null;
     }
 
+    // Stop legacy audio source (for base64 playback)
     if (currentAudioSourceRef.current) {
       try {
         // Disconnect and stop the source
@@ -845,63 +848,12 @@ const JournalApp: React.FC = () => {
 
     // Clear state
     setIsPlayingAudio(false);
-    setIsPaused(false);
     setActiveAudioId(null);
     audioChunksRef.current = [];
     currentChunkIndexRef.current = 0;
   };
 
-  const pauseCurrentAudio = () => {
-    if (!shouldContinuePlayingRef.current) return; // Don't pause if already stopped
-
-    // Pause progressive player if active
-    if (progressivePlayerRef.current) {
-      try {
-        progressivePlayerRef.current.pause();
-        setIsPaused(true);
-      } catch (e) {
-        console.error('Error pausing progressive player:', e);
-      }
-      return;
-    }
-
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.suspend().then(() => {
-        if (shouldContinuePlayingRef.current) { // Check again after async operation
-          setIsPaused(true);
-        }
-      }).catch(console.error);
-    }
-  };
-
-  const resumeCurrentAudio = () => {
-    if (!shouldContinuePlayingRef.current) return; // Don't resume if stopped
-
-    // Resume progressive player if active
-    if (progressivePlayerRef.current) {
-      try {
-        progressivePlayerRef.current.resume().then(() => {
-          if (shouldContinuePlayingRef.current) {
-            setIsPaused(false);
-          }
-        }).catch(console.error);
-      } catch (e) {
-        console.error('Error resuming progressive player:', e);
-      }
-      return;
-    }
-
-    if (audioContextRef.current) {
-      const ctxState = audioContextRef.current.state as string;
-      if (ctxState === 'suspended' || ctxState === 'interrupted') {
-        audioContextRef.current.resume().then(() => {
-          if (shouldContinuePlayingRef.current) { // Check again after async operation
-            setIsPaused(false);
-          }
-        }).catch(console.error);
-      }
-    }
-  };
+  // Pause/resume removed - using simple play/stop pattern
 
   // Detect if audio is compressed (from database) or raw PCM (from cache/generation)
   const isCompressedAudio = (base64Audio: string): boolean => {
@@ -1151,8 +1103,7 @@ const JournalApp: React.FC = () => {
           shouldContinuePlayingRef.current = false;
           currentPlaybackIdRef.current = null;
           setIsPlayingAudio(false);
-          setIsPaused(false);
-          setActiveAudioId(null);
+                    setActiveAudioId(null);
 
           // Provide user-friendly error message
           const errorMsg = error?.message || 'Unknown audio error';
@@ -1176,8 +1127,7 @@ const JournalApp: React.FC = () => {
 
         currentAudioSourceRef.current = source;
         setIsPlayingAudio(true);
-        setIsPaused(false);
-        setActiveAudioId(id);
+                setActiveAudioId(id);
 
         // Note: Wake lock will be automatically requested via useEffect when isPlayingAudio becomes true
         // This ensures audio continues playing even when screen turns off on iOS
@@ -1245,49 +1195,61 @@ const JournalApp: React.FC = () => {
   };
 
   const playAudio = async (
-    audioData: string | string[] | ReadableStream<Uint8Array>,
-    id: string | number = 'main'
+    audioData: string | string[] | Response,
+    id: string | number = 'main',
+    format?: AudioFormat
   ) => {
     stopCurrentAudio();
 
-    // Handle streaming audio (ReadableStream) - PRIMARY METHOD
-    if (audioData instanceof ReadableStream) {
+    // Handle streaming audio (Response) - PRIMARY METHOD
+    if (audioData instanceof Response) {
       try {
-        const player = await createProgressiveAudioPlayer();
-        progressivePlayerRef.current = player;
+        // Determine format from Content-Type header
+        const contentType = audioData.headers.get('Content-Type') || '';
+        const audioFormat: AudioFormat = format || (
+          contentType.includes('audio/L16') ? 'pcm' :
+          contentType.includes('audio/wav') ? 'wav' :
+          contentType.includes('audio/mpeg') ? 'mp3' : 'wav'
+        );
 
-        // Update state immediately - playback will start in 2-3 seconds
+        console.log(`[playAudio] Creating AudioStreamPlayer (format: ${audioFormat})`);
+        const player = new AudioStreamPlayer({
+          format: audioFormat,
+          sampleRate: 44100,
+          onLog: (msg) => console.log(`[AudioPlayer] ${msg}`),
+          onStatusChange: (status) => console.log(`[AudioPlayer] Status: ${status}`)
+        });
+        audioPlayerRef.current = player;
+
+        // Update state immediately - playback will start in 1-2 seconds
         setIsPlayingAudio(true);
-        setIsPaused(false);
         setActiveAudioId(id);
         shouldContinuePlayingRef.current = true;
         currentPlaybackIdRef.current = id;
 
         // Start playback asynchronously (don't await - let it run in background)
-        player.play(audioData).then(() => {
+        player.playFromResponse(audioData).then(() => {
           // Playback completed successfully
           console.log('[playAudio] Streaming playback completed');
-          if (progressivePlayerRef.current === player) {
-            progressivePlayerRef.current = null;
+          if (audioPlayerRef.current === player) {
+            audioPlayerRef.current = null;
           }
           setIsPlayingAudio(false);
-          setIsPaused(false);
           setActiveAudioId(null);
           currentPlaybackIdRef.current = null;
         }).catch((error) => {
           console.error('Error during streaming playback:', error);
-          if (progressivePlayerRef.current === player) {
-            progressivePlayerRef.current = null;
+          if (audioPlayerRef.current === player) {
+            audioPlayerRef.current = null;
           }
           showToast('Error playing audio', 'error');
           setIsPlayingAudio(false);
-          setIsPaused(false);
           setActiveAudioId(null);
           currentPlaybackIdRef.current = null;
         });
       } catch (error) {
         console.error('Error initializing streaming audio:', error);
-        progressivePlayerRef.current = null;
+        audioPlayerRef.current = null;
         showToast('Error playing audio', 'error');
         setIsPlayingAudio(false);
         setActiveAudioId(null);
@@ -1323,8 +1285,7 @@ const JournalApp: React.FC = () => {
       if (!shouldContinuePlayingRef.current || currentPlaybackIdRef.current !== id) {
         if (playbackSessionIdRef.current === currentSessionId) {
           setIsPlayingAudio(false);
-          setIsPaused(false);
-          setActiveAudioId(null);
+                    setActiveAudioId(null);
           audioChunksRef.current = [];
           currentChunkIndexRef.current = 0;
         }
@@ -1337,8 +1298,7 @@ const JournalApp: React.FC = () => {
           shouldContinuePlayingRef.current = false;
           currentPlaybackIdRef.current = null;
           setIsPlayingAudio(false);
-          setIsPaused(false);
-          setActiveAudioId(null);
+                    setActiveAudioId(null);
           audioChunksRef.current = [];
           currentChunkIndexRef.current = 0;
         }
@@ -1374,8 +1334,7 @@ const JournalApp: React.FC = () => {
               shouldContinuePlayingRef.current = false;
               currentPlaybackIdRef.current = null;
               setIsPlayingAudio(false);
-              setIsPaused(false);
-              setActiveAudioId(null);
+                            setActiveAudioId(null);
               audioChunksRef.current = [];
               currentChunkIndexRef.current = 0;
             }
@@ -1387,8 +1346,7 @@ const JournalApp: React.FC = () => {
           shouldContinuePlayingRef.current = false;
           currentPlaybackIdRef.current = null;
           setIsPlayingAudio(false);
-          setIsPaused(false);
-          setActiveAudioId(null);
+                    setActiveAudioId(null);
           audioChunksRef.current = [];
           currentChunkIndexRef.current = 0;
         }
@@ -1430,7 +1388,6 @@ const JournalApp: React.FC = () => {
     console.log('[handleTogglePlayback] Called', {
       isPlayingAudio,
       activeAudioId,
-      isPaused,
       hasReflection: !!reflection,
       hasCurrentAudioBase64: !!currentAudioBase64
     });
@@ -1568,7 +1525,7 @@ const JournalApp: React.FC = () => {
 
             // Play stream directly for progressive playback
             // IndexedDB caching disabled - S3 provides fast enough streaming
-            playAudio(response.body, id);
+            playAudio(response, id);
 
             // IndexedDB caching disabled - S3 provides fast enough streaming
             // No need to cache locally since S3 is almost real-time
@@ -1652,14 +1609,9 @@ const JournalApp: React.FC = () => {
     const id = `chat-${index}`;
     const msg = chatMessages[index];
 
+    // Simple play/stop pattern
     if (isPlayingAudio && activeAudioId === id) {
-      if (isPaused) {
-        resumeCurrentAudio();
-      } else {
-        pauseCurrentAudio();
-      }
-    } else if (isPaused && activeAudioId === id) {
-      resumeCurrentAudio();
+      stopCurrentAudio();
     } else {
       if (msg?.audioBase64) {
         const audioData = typeof msg.audioBase64 === 'string'
@@ -2173,8 +2125,7 @@ const JournalApp: React.FC = () => {
     stopCurrentAudio();
     setCurrentAudioBase64(null);
     setIsPlayingAudio(false);
-    setIsPaused(false);
-    setActiveAudioId(null);
+        setActiveAudioId(null);
     setIsGeneratingVoice(false);
     setGeneratingAudioId(null);
     setPlaybackRate(1.0);
@@ -2645,7 +2596,6 @@ const JournalApp: React.FC = () => {
               onPlay={handleTogglePlayback}
               onStop={stopCurrentAudio}
               isPlaying={isPlayingAudio && activeAudioId === 'main'}
-              isPaused={isPaused && activeAudioId === 'main'}
               isGeneratingVoice={isGeneratingVoice && generatingAudioId === 'main'}
               playbackRate={playbackRate}
               onPlaybackRateChange={setPlaybackSpeed}
@@ -2744,10 +2694,8 @@ const JournalApp: React.FC = () => {
             onDeleteEntry={deleteHistoryEntry}
             onClearAll={clearAllHistory}
             onPlayAudio={handleHistoryAudioPlayback}
-            onPauseAudio={pauseCurrentAudio}
             activeAudioId={activeAudioId}
             isPlaying={isPlayingAudio}
-            isPaused={isPaused}
             isGeneratingVoice={isGeneratingVoice}
             generatingAudioId={generatingAudioId}
           />

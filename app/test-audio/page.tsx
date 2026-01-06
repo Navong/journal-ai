@@ -1,42 +1,24 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { AudioStreamPlayer, AudioFormat } from '@/app/utils/audioStreamPlayer';
 
 export default function TestAudioPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [status, setStatus] = useState('Ready to test');
   const [logs, setLogs] = useState<string[]>([]);
-  const [provider, setProvider] = useState<'cartesia' | 'murf' | 'elevenlabs' | 'fish'>('cartesia');
-  const [textLength, setTextLength] = useState<'short' | 'long'>('short');
+  const [provider, setProvider] = useState<'cartesia' | 'murf' | 'elevenlabs' | 'fish' | 'gemini'>('cartesia');
+  const [textLength, setTextLength] = useState<'short' | 'long' | 'journal'>('short');
+  const [mood, setMood] = useState<'calm' | 'joyful' | 'anxious' | 'tired' | 'reflective' | 'heavy' | 'none'>('none');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const blobUrlRef = useRef<string | null>(null);
+  const audioPlayerRef = useRef<AudioStreamPlayer | null>(null);
 
   const addLog = (message: string) => {
     const timestamp = new Date().toLocaleTimeString();
     const logMessage = `[${timestamp}] ${message}`;
     console.log(logMessage);
     setLogs(prev => [...prev, logMessage]);
-  };
-
-  // Convert raw PCM bytes to AudioBuffer for Web Audio API
-  // PCM format: 16-bit signed integers, little-endian, mono
-  const pcmToAudioBuffer = (pcmData: Uint8Array, audioContext: AudioContext, channels: number = 1): AudioBuffer => {
-    // PCM is 16-bit (2 bytes per sample)
-    const numSamples = Math.floor(pcmData.length / 2);
-    const audioBuffer = audioContext.createBuffer(channels, numSamples, audioContext.sampleRate);
-
-    // Convert 16-bit PCM to float32 (-1.0 to 1.0)
-    const dataView = new DataView(pcmData.buffer, pcmData.byteOffset, pcmData.byteLength);
-    const channelData = audioBuffer.getChannelData(0);
-
-    for (let i = 0; i < numSamples; i++) {
-      // Read 16-bit signed integer (little-endian)
-      const int16Value = dataView.getInt16(i * 2, true);
-      // Convert to float32 range (-1.0 to 1.0)
-      channelData[i] = int16Value / 32768.0;
-    }
-
-    return audioBuffer;
   };
 
   const testAudioStreaming = async () => {
@@ -46,12 +28,18 @@ export default function TestAudioPage() {
       addLog('=== Audio Streaming Test Started ===');
 
       // Test texts (computed dynamically based on provider)
-      const providerName = provider === 'cartesia' ? 'Cartesia' : provider === 'murf' ? 'Murf' : provider === 'elevenlabs' ? 'ElevenLabs' : 'Fish Audio';
+      const providerName = provider === 'cartesia' ? 'Cartesia' : provider === 'murf' ? 'Murf' : provider === 'elevenlabs' ? 'ElevenLabs' : provider === 'fish' ? 'Fish Audio' : 'Gemini Flash';
       const shortText = `Hello! This is a comprehensive test of the audio streaming system. We are testing how quickly ${providerName} can generate speech and stream it back to the client.`;
 
       const longText = `Hello! This is a comprehensive test of the audio streaming system. We are testing how quickly ${providerName} can generate speech and stream it back to the client. The goal is to measure the time it takes from making the request to hearing the first audio, as well as the total time to complete playback. This longer sentence will help us understand the performance characteristics of the streaming implementation. Progressive audio playback is a critical feature for creating responsive user experiences. When users write journal entries and request AI reflections, they should not have to wait several seconds before hearing the response. By using WAV format instead of MP3, we can decode and play partial audio while the rest of the file is still downloading. This approach provides a much better user experience, allowing the audio to start playing within just two to three seconds, rather than waiting for the entire file to download. The seamless transition between the partial playback and the continuation ensures that users hear a continuous, uninterrupted reflection without any awkward gaps or overlapping audio. This is exactly the kind of polished experience that makes an application feel professional and well-designed.`;
 
-      const testText = textLength === 'short' ? shortText : longText;
+      const journalText = `Today was challenging. I spent most of the morning in back-to-back meetings about the new project launch. 오늘 정말 바쁜 하루였어요. The deadline is approaching fast, and I can feel the pressure building. My manager Sarah mentioned that we need to finalize the marketing strategy by next week.
+
+점심시간에 잠깐 공원을 산책했는데, 그게 큰 도움이 됐어요. The fresh air helped clear my mind. I realized that I've been so focused on work that I haven't called my parents in two weeks. 부모님께 전화드려야 하는데 자꾸 미루게 되네요.
+
+Sometimes I wonder if I'm doing enough. The team at the office seems to be handling everything so well, but I feel like I'm always playing catch-up. 내일은 좀 더 여유있게 시작해봐야겠어요.`;
+
+      const testText = textLength === 'short' ? shortText : textLength === 'long' ? longText : journalText;
       addLog(`Test text length: ${textLength} (${testText.length} characters)`);
       addLog(`Test text: "${testText.substring(0, 100)}${testText.length > 100 ? '...' : ''}"`);
 
@@ -61,17 +49,24 @@ export default function TestAudioPage() {
 
       const requestStartTime = Date.now();
       addLog(`Using TTS provider: ${provider}`);
+      if (mood !== 'none') {
+        addLog(`Selected mood: ${mood} (Fish Audio will apply emotion)`);
+      }
       addLog(`📤 Sending request to /api/tts at ${new Date().toLocaleTimeString()}`);
 
       const fetchStartTime = Date.now();
-      // Add format parameter for PCM format
-      const formatParam = provider === 'murf' ? 'pcm' : 'wav'; // Murf uses PCM, others use WAV/MP3
-      const response = await fetch(`/api/tts?provider=${provider}&format=${formatParam}`, {
+      // Determine format based on provider
+      // Cartesia and Murf use raw PCM (needs manual conversion)
+      // Fish and Gemini use WAV (PCM with headers, browser-decodable)
+      // ElevenLabs uses MP3 (compressed, smaller size)
+      const formatParam: AudioFormat = (provider === 'cartesia' || provider === 'murf') ? 'pcm' : (provider === 'fish' || provider === 'gemini' ? 'wav' : 'mp3');
+      addLog('🔄 S3 cache DISABLED (skipCache=true) - testing real API stream');
+      const response = await fetch(`/api/tts?provider=${provider}&format=${formatParam}&skipCache=true`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ text: testText }),
+        body: JSON.stringify({ text: testText, mood: mood !== 'none' ? mood : undefined }),
       });
 
       const fetchTime = Date.now() - fetchStartTime;
@@ -79,6 +74,12 @@ export default function TestAudioPage() {
       addLog(`⏱️ Response received: ${fetchTime}ms (total: ${totalTimeToResponse}ms from request start)`);
       addLog(`Status: ${response.status} ${response.statusText}`);
       addLog(`Content-Type: ${response.headers.get('Content-Type')}`);
+
+      // Log cache status from response headers
+      const cacheStatus = response.headers.get('X-Cache-Status');
+      if (cacheStatus) {
+        addLog(`📦 Cache Status: ${cacheStatus}`);
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -89,293 +90,29 @@ export default function TestAudioPage() {
       const contentType = response.headers.get('Content-Type') || '';
       const sampleRateHeader = response.headers.get('X-Audio-Sample-Rate');
       const sampleRate = sampleRateHeader ? parseInt(sampleRateHeader, 10) : 44100;
-      const isPCM = contentType.includes('L16') || contentType.includes('pcm');
-      addLog(`Received content type: ${contentType}${isPCM ? ` (PCM, ${sampleRate}Hz)` : ''}`);
+      addLog(`Received content type: ${contentType} (${formatParam} format, ${sampleRate}Hz)`);
 
       if (contentType.includes('audio/')) {
-        // Binary streaming audio - PCM or WAV format
-        setStatus(isPCM ? 'Setting up PCM audio playback...' : 'Setting up progressive audio playback...');
-        addLog(isPCM ? 'Detected binary audio stream (PCM format - raw, uncompressed)' : 'Detected binary audio stream (WAV format)');
-        if (isPCM) {
+        // Binary streaming audio - use AudioStreamPlayer
+        setStatus(`Setting up ${formatParam.toUpperCase()} audio playback...`);
+        addLog(`Detected binary audio stream (${formatParam.toUpperCase()} format)`);
+        if (formatParam === 'pcm') {
           addLog('PCM format: Lowest latency, uncompressed, largest payload size');
-        } else {
-          addLog('Attempting progressive WAV playback...');
         }
 
-        const streamStartTime = Date.now();
+        // Use AudioStreamPlayer for unified streaming playback
+        audioPlayerRef.current = new AudioStreamPlayer({
+          format: formatParam,
+          sampleRate,
+          onLog: addLog,
+          onProgress: (bytesReceived) => {
+            // Progress updates are logged by AudioStreamPlayer
+          },
+          onStatusChange: setStatus,
+        });
 
-        // Read stream and collect chunks
-        const reader = response.body?.getReader();
-        if (!reader) {
-          throw new Error('No response body reader available');
-        }
-
-        const chunks: Uint8Array[] = [];
-        let totalBytes = 0;
-        let chunkCount = 0;
-        // Buffer size: 1MB per segment for progressive playback
-        // Split into multiple segments (3+) to handle stream slowdowns better
-        const SEGMENT_SIZE = 1024 * 1024; // 1MB per segment
-        const MAX_SEGMENTS = 10; // Maximum number of segments to create (safety limit)
-        let firstChunkTime: number | null = null;
-        let firstChunkSentTime: number | null = null;
-
-        addLog(isPCM ? '📥 Reading PCM chunks from stream...' : '📥 Reading WAV chunks from stream...');
-
-        // Read chunks and attempt progressive playback with multiple segments
-        let audioContext: AudioContext | null = null;
-        let earlyPlaybackStarted = false;
-        let segmentIndex = 0; // Track current segment number
-        let segmentDurations: number[] = []; // Track duration of each segment
-        let segmentChunkCounts: number[] = []; // Track chunk count per segment
-        let lastPlaybackPromise: Promise<void> | null = null; // Promise for last segment playback
-        let segmentProcessingPromise: Promise<void> = Promise.resolve(); // Chain segment processing sequentially
-
-        while (true) {
-          const chunkReadStart = Date.now();
-          const { done, value } = await reader.read();
-          const chunkReadTime = Date.now() - chunkReadStart;
-
-          if (done) {
-            addLog('✅ All chunks received');
-            break;
-          }
-
-          if (value) {
-            if (firstChunkTime === null) {
-              firstChunkTime = Date.now();
-              const timeToFirstChunk = firstChunkTime - requestStartTime;
-              const timeFromResponse = firstChunkTime - (requestStartTime + fetchTime);
-              addLog(`⚡ First chunk received: ${timeToFirstChunk}ms from request start (${timeFromResponse}ms from response, read: ${chunkReadTime}ms, size: ${value.length} bytes)`);
-            }
-
-            chunks.push(value);
-            totalBytes += value.length;
-            chunkCount++;
-
-            if (firstChunkSentTime === null) {
-              firstChunkSentTime = Date.now();
-              const timeToFirstChunkSent = firstChunkSentTime - requestStartTime;
-              addLog(`🎵 First chunk processed: ${timeToFirstChunkSent}ms from request start`);
-            }
-
-            // Calculate and log speed metrics
-            const elapsed = Date.now() - streamStartTime;
-            const rate = (totalBytes / 1024) / (elapsed / 1000);
-            const avgRate = (totalBytes / 1024) / ((Date.now() - requestStartTime) / 1000);
-
-            if (chunkCount <= 5 || chunkCount % 50 === 0) {
-              addLog(`📦 Chunk ${chunkCount}: ${value.length} bytes, total: ${(totalBytes / 1024).toFixed(1)}KB, rate: ${rate.toFixed(2)}KB/s (avg: ${avgRate.toFixed(2)}KB/s, read: ${chunkReadTime}ms)`);
-            }
-
-            // Progressive multi-segment playback: Play segments as they're buffered
-            // Check if we've reached the threshold for the next segment (1MB per segment)
-            const currentSegmentThreshold = (segmentIndex + 1) * SEGMENT_SIZE;
-            if (segmentIndex < MAX_SEGMENTS && totalBytes >= currentSegmentThreshold) {
-              const segmentNum = segmentIndex + 1;
-              segmentIndex++; // Increment immediately to prevent race conditions
-              const bufferTime = Date.now() - streamStartTime;
-              const totalTimeToBuffer = Date.now() - requestStartTime;
-              const bufferRate = (totalBytes / 1024) / (bufferTime / 1000);
-              addLog(`✅ Segment ${segmentNum} ready: ${(totalBytes / 1024).toFixed(1)}KB buffered in ${bufferTime}ms (rate: ${bufferRate.toFixed(2)}KB/s), preparing playback...`);
-
-              // Process segment sequentially - chain to previous segment processing to prevent overlap
-              segmentProcessingPromise = segmentProcessingPromise.then(async () => {
-                try {
-                  // Calculate segment boundaries (segmentNum is 1-based, so subtract 1 for 0-based index)
-                  const segmentZeroBasedIndex = segmentNum - 1;
-                  const segmentStartByte = segmentZeroBasedIndex * SEGMENT_SIZE;
-                  const segmentEndByte = Math.min(totalBytes, segmentNum * SEGMENT_SIZE);
-                  const segmentLength = segmentEndByte - segmentStartByte;
-
-                  // Combine all chunks into a single buffer first
-                  const allChunksLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-                  const allChunksBuffer = new Uint8Array(allChunksLength);
-                  let offset = 0;
-                  for (const chunk of chunks) {
-                    allChunksBuffer.set(chunk, offset);
-                    offset += chunk.length;
-                  }
-
-                  // Extract this segment's byte range
-                  const segmentBuffer = allChunksBuffer.slice(segmentStartByte, segmentEndByte);
-                  const segmentChunkCount = chunks.length; // Approximate - actual count is complex to calculate
-
-                  addLog(`📊 Segment ${segmentNum}: ${(segmentLength / 1024).toFixed(1)}KB (bytes ${segmentStartByte}-${segmentEndByte} of ${allChunksLength})`);
-
-                  // Yield to event loop
-                  await new Promise(resolve => setTimeout(resolve, 0));
-
-                  // Create AudioContext if needed
-                  if (!audioContext) {
-                    audioContext = new AudioContext({ sampleRate });
-                    if (audioContext.state === 'suspended') {
-                      await audioContext.resume();
-                    }
-                    addLog(`AudioContext created (state: ${audioContext.state}, sampleRate: ${audioContext.sampleRate}Hz)`);
-                  }
-
-                  // Convert/decode segment
-                  let audioBuffer: AudioBuffer;
-                  if (isPCM) {
-                    const convertStart = Date.now();
-                    audioBuffer = pcmToAudioBuffer(segmentBuffer, audioContext, 1);
-                    const convertTime = Date.now() - convertStart;
-                    addLog(`✅ Segment ${segmentNum} PCM converted in ${convertTime}ms! Duration: ${audioBuffer.duration.toFixed(2)}s`);
-                  } else {
-                    audioBuffer = await audioContext.decodeAudioData(segmentBuffer.buffer.slice(0));
-                    addLog(`✅ Segment ${segmentNum} WAV decoded! Duration: ${audioBuffer.duration.toFixed(2)}s`);
-                  }
-
-                  const segmentDuration = audioBuffer.duration;
-                  segmentDurations.push(segmentDuration);
-                  segmentChunkCounts.push(segmentChunkCount);
-
-                  // Play segment - chain it after the previous segment
-                  const playSegment = async () => {
-                    return new Promise<void>((resolve) => {
-                      const source = audioContext!.createBufferSource();
-                      source.buffer = audioBuffer;
-                      source.connect(audioContext!.destination);
-
-                      if (segmentNum === 1) {
-                        const playTime = Date.now() - requestStartTime;
-                        addLog(`🎵 Segment ${segmentNum} PLAYBACK STARTED in ${playTime}ms from request start`);
-                        setStatus(`Playing audio (segment ${segmentNum}, progressive playback)...`);
-                        earlyPlaybackStarted = true;
-                      } else {
-                        addLog(`🎵 Segment ${segmentNum} PLAYBACK STARTED (chained after segment ${segmentNum - 1})`);
-                        setStatus(`Playing audio (segment ${segmentNum}/${Math.ceil(totalBytes / SEGMENT_SIZE)}, progressive playback)...`);
-                      }
-
-                      source.onended = () => {
-                        addLog(`✅ Segment ${segmentNum} ended (${segmentDuration.toFixed(2)}s played)`);
-                        resolve();
-                      };
-
-                      source.start(0);
-                    });
-                  };
-
-                  // Wait for previous segment to finish (if any), then play this one
-                  if (lastPlaybackPromise) {
-                    await lastPlaybackPromise;
-                  }
-                  lastPlaybackPromise = playSegment();
-
-                } catch (error: any) {
-                  addLog(`⚠️ Segment ${segmentNum} playback failed: ${error.message}`);
-                }
-              });
-            }
-
-            // Yield briefly to event loop every 10 chunks to prevent blocking
-            // This helps stream reading continue even when audio playback is active
-            if (chunkCount % 10 === 0) {
-              await Promise.resolve(); // Microtask yield - lower latency than setTimeout
-            }
-          }
-        }
-
-        const streamTime = Date.now() - streamStartTime;
-        const totalTime = Date.now() - requestStartTime;
-        const finalRate = (totalBytes / 1024) / (streamTime / 1000);
-        const avgRate = (totalBytes / 1024) / (totalTime / 1000);
-        addLog(`📊 Stream complete: ${chunkCount} chunks, ${(totalBytes / 1024).toFixed(1)}KB in ${streamTime}ms`);
-        addLog(`⏱️ Performance: ${finalRate.toFixed(2)}KB/s streaming rate, ${avgRate.toFixed(2)}KB/s average`);
-        addLog(`⏱️ Total latency: ${totalTime}ms from request start (fetch: ${fetchTime}ms, stream: ${streamTime}ms)`);
-
-        if (firstChunkTime) {
-          const timeToFirstAudio = firstChunkTime - requestStartTime;
-          addLog(`🚀 Time to first audio chunk: ${timeToFirstAudio}ms`);
-        }
-
-        // ALWAYS play complete audio after stream finishes (even if partial played)
-        setStatus('Decoding complete audio...');
-
-        // Combine all chunks for final playback
-        const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-        const completeChunkCount = chunks.length;
-        const totalSegmentsPlayed = segmentIndex;
-        addLog(`📊 Complete buffer: ${completeChunkCount} chunks total, ${(totalLength / 1024).toFixed(1)}KB total`);
-        if (earlyPlaybackStarted && totalSegmentsPlayed > 0) {
-          const totalSegmentBytes = totalSegmentsPlayed * SEGMENT_SIZE;
-          const remainingBytes = totalLength - totalSegmentBytes;
-          addLog(`   └─ Segments played: ${totalSegmentsPlayed} segments (${(totalSegmentBytes / 1024).toFixed(0)}KB)`);
-          addLog(`   └─ Remaining: ${(remainingBytes / 1024).toFixed(0)}KB`);
-        }
-        const completeBuffer = new Uint8Array(totalLength);
-        let offset = 0;
-        for (const chunk of chunks) {
-          completeBuffer.set(chunk, offset);
-          offset += chunk.length;
-        }
-
-        addLog(`Combined ${(totalLength / 1024).toFixed(1)}KB ${isPCM ? 'PCM' : 'WAV'} data`);
-
-        // Create AudioContext if not already created
-        if (!audioContext) {
-          audioContext = new AudioContext({ sampleRate: isPCM ? sampleRate : undefined });
-          if (audioContext.state === 'suspended') {
-            await audioContext.resume();
-          }
-          addLog(`AudioContext created (state: ${audioContext.state}, sampleRate: ${audioContext.sampleRate}Hz)`);
-        }
-
-        // Decode/convert complete audio
-        const decodeStart = Date.now();
-        let completeAudioBuffer: AudioBuffer;
-        if (isPCM) {
-          // Convert raw PCM to AudioBuffer (no decoding needed - direct conversion)
-          completeAudioBuffer = pcmToAudioBuffer(completeBuffer, audioContext, 1);
-        } else {
-          // Decode WAV format
-          completeAudioBuffer = await audioContext.decodeAudioData(completeBuffer.buffer.slice(0));
-        }
-        const decodeTime = Date.now() - decodeStart;
-
-        addLog(`🔊 Complete audio ${isPCM ? 'converted' : 'decoded'} in ${decodeTime}ms`);
-        addLog(`📈 Audio stats: Duration: ${completeAudioBuffer.duration.toFixed(2)}s, Sample rate: ${completeAudioBuffer.sampleRate}Hz, Channels: ${completeAudioBuffer.numberOfChannels}`);
-
-        const totalTimeToDecode = Date.now() - requestStartTime;
-        const decodeRate = (totalLength / 1024) / (totalTimeToDecode / 1000);
-        addLog(`⏱️ Time to decode: ${totalTimeToDecode}ms from request start (decode rate: ${decodeRate.toFixed(2)}KB/s)`);
-
-        // Play complete audio from where partial left off
-        const source = audioContext.createBufferSource();
-        source.buffer = completeAudioBuffer;
-        source.connect(audioContext.destination);
-
-        source.onended = () => {
-          const totalTime = Date.now() - requestStartTime;
-          const playbackDuration = completeAudioBuffer.duration * 1000;
-          addLog(`🏁 Playback ended. Total time: ${totalTime}ms from request start`);
-          addLog(`📊 Summary: Audio duration: ${playbackDuration.toFixed(0)}ms, Total latency: ${totalTime}ms, Efficiency: ${((playbackDuration / totalTime) * 100).toFixed(1)}%`);
-          setStatus('Test completed successfully! ✅');
-          setIsPlaying(false);
-        };
-
-        if (earlyPlaybackStarted) {
-          // Wait for all segment processing AND playback to finish before starting final playback
-          addLog(`Waiting for ${totalSegmentsPlayed} segment(s) to finish processing and playback...`);
-          await segmentProcessingPromise; // Wait for all segment processing to complete
-          if (lastPlaybackPromise) {
-            await lastPlaybackPromise; // Wait for all segment playback to complete
-          }
-          addLog('All segments finished, starting final playback...');
-
-          // Calculate total duration of segments played so far
-          const totalSegmentDuration = segmentDurations.reduce((sum, duration) => sum + duration, 0);
-          addLog(`▶️ Playing remaining audio from ${totalSegmentDuration.toFixed(2)}s (${totalSegmentsPlayed} segments already played)...`);
-          setStatus('Playing remaining audio...');
-          source.start(0, totalSegmentDuration);
-        } else {
-          // Play from beginning
-          const playTime = Date.now() - requestStartTime;
-          addLog(`🎵 PLAYBACK STARTED in ${playTime}ms from initial request`);
-          setStatus('Playing complete audio...');
-          source.start(0);
-        }
+        await audioPlayerRef.current.playFromResponse(response);
+        setIsPlaying(false);
 
       } else {
         // JSON response (fallback) - use HTML5 audio with data URL
@@ -418,6 +155,9 @@ export default function TestAudioPage() {
   };
 
   const stopAudio = () => {
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.stop();
+    }
     if (audioRef.current) {
       try {
         audioRef.current.pause();
@@ -441,6 +181,9 @@ export default function TestAudioPage() {
     return () => {
       if (blobUrlRef.current) {
         URL.revokeObjectURL(blobUrlRef.current);
+      }
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.dispose();
       }
     };
   }, []);
@@ -490,11 +233,22 @@ export default function TestAudioPage() {
               type="radio"
               value="fish"
               checked={provider === 'fish'}
-              onChange={(e) => setProvider(e.target.value as 'cartesia' | 'murf' | 'elevenlabs' | 'fish')}
+              onChange={(e) => setProvider(e.target.value as 'cartesia' | 'murf' | 'elevenlabs' | 'fish' | 'gemini')}
               disabled={isPlaying}
               style={{ marginRight: '0.5rem' }}
             />
             Fish Audio (S1)
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              value="gemini"
+              checked={provider === 'gemini'}
+              onChange={(e) => setProvider(e.target.value as 'cartesia' | 'murf' | 'elevenlabs' | 'fish' | 'gemini')}
+              disabled={isPlaying}
+              style={{ marginRight: '0.5rem' }}
+            />
+            Gemini Flash
           </label>
         </div>
         <p style={{ margin: 0, fontWeight: 'bold', marginBottom: '0.5rem' }}>Text Length:</p>
@@ -504,7 +258,7 @@ export default function TestAudioPage() {
               type="radio"
               value="short"
               checked={textLength === 'short'}
-              onChange={(e) => setTextLength(e.target.value as 'short' | 'long')}
+              onChange={(e) => setTextLength(e.target.value as 'short' | 'long' | 'journal')}
               disabled={isPlaying}
               style={{ marginRight: '0.5rem' }}
             />
@@ -515,20 +269,116 @@ export default function TestAudioPage() {
               type="radio"
               value="long"
               checked={textLength === 'long'}
-              onChange={(e) => setTextLength(e.target.value as 'short' | 'long')}
+              onChange={(e) => setTextLength(e.target.value as 'short' | 'long' | 'journal')}
               disabled={isPlaying}
               style={{ marginRight: '0.5rem' }}
             />
             Long
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              value="journal"
+              checked={textLength === 'journal'}
+              onChange={(e) => setTextLength(e.target.value as 'short' | 'long' | 'journal')}
+              disabled={isPlaying}
+              style={{ marginRight: '0.5rem' }}
+            />
+            Journal (EN+KO)
+          </label>
+        </div>
+        <p style={{ margin: 0, fontWeight: 'bold', marginBottom: '0.5rem', marginTop: '1rem' }}>Mood (Fish Audio Emotion):</p>
+        <div style={{ marginBottom: '1rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              value="none"
+              checked={mood === 'none'}
+              onChange={(e) => setMood(e.target.value as any)}
+              disabled={isPlaying}
+              style={{ marginRight: '0.5rem' }}
+            />
+            None
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              value="calm"
+              checked={mood === 'calm'}
+              onChange={(e) => setMood(e.target.value as any)}
+              disabled={isPlaying}
+              style={{ marginRight: '0.5rem' }}
+            />
+            Calm
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              value="joyful"
+              checked={mood === 'joyful'}
+              onChange={(e) => setMood(e.target.value as any)}
+              disabled={isPlaying}
+              style={{ marginRight: '0.5rem' }}
+            />
+            Joyful
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              value="anxious"
+              checked={mood === 'anxious'}
+              onChange={(e) => setMood(e.target.value as any)}
+              disabled={isPlaying}
+              style={{ marginRight: '0.5rem' }}
+            />
+            Anxious
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              value="tired"
+              checked={mood === 'tired'}
+              onChange={(e) => setMood(e.target.value as any)}
+              disabled={isPlaying}
+              style={{ marginRight: '0.5rem' }}
+            />
+            Tired
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              value="reflective"
+              checked={mood === 'reflective'}
+              onChange={(e) => setMood(e.target.value as any)}
+              disabled={isPlaying}
+              style={{ marginRight: '0.5rem' }}
+            />
+            Reflective
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              value="heavy"
+              checked={mood === 'heavy'}
+              onChange={(e) => setMood(e.target.value as any)}
+              disabled={isPlaying}
+              style={{ marginRight: '0.5rem' }}
+            />
+            Heavy
+          </label>
         </div>
         <p style={{ margin: 0, fontWeight: 'bold' }}>Test Text:</p>
         <div style={{ margin: '0.5rem 0', fontStyle: 'italic', fontSize: '0.85rem', maxHeight: '120px', overflowY: 'auto', padding: '0.5rem', background: '#fff', borderRadius: '4px' }}>
           {(() => {
-            const providerName = provider === 'cartesia' ? 'Cartesia' : provider === 'murf' ? 'Murf' : provider === 'elevenlabs' ? 'ElevenLabs' : 'Fish Audio';
+            const providerName = provider === 'cartesia' ? 'Cartesia' : provider === 'murf' ? 'Murf' : provider === 'elevenlabs' ? 'ElevenLabs' : provider === 'fish' ? 'Fish Audio' : 'Gemini Flash';
             const short = `Hello! This is a comprehensive test of the audio streaming system. We are testing how quickly ${providerName} can generate speech and stream it back to the client.`;
             const long = `Hello! This is a comprehensive test of the audio streaming system. We are testing how quickly ${providerName} can generate speech and stream it back to the client. The goal is to measure the time it takes from making the request to hearing the first audio, as well as the total time to complete playback. This longer sentence will help us understand the performance characteristics of the streaming implementation. Progressive audio playback is a critical feature for creating responsive user experiences. When users write journal entries and request AI reflections, they should not have to wait several seconds before hearing the response. By using WAV format instead of MP3, we can decode and play partial audio while the rest of the file is still downloading. This approach provides a much better user experience, allowing the audio to start playing within just two to three seconds, rather than waiting for the entire file to download. The seamless transition between the partial playback and the continuation ensures that users hear a continuous, uninterrupted reflection without any awkward gaps or overlapping audio. This is exactly the kind of polished experience that makes an application feel professional and well-designed.`;
-            return `"${textLength === 'short' ? short : long}"`;
+            const journal = `Today was challenging. I spent most of the morning in back-to-back meetings about the new project launch. 오늘 정말 바쁜 하루였어요. The deadline is approaching fast, and I can feel the pressure building. My manager Sarah mentioned that we need to finalize the marketing strategy by next week.
+
+점심시간에 잠깐 공원을 산책했는데, 그게 큰 도움이 됐어요. The fresh air helped clear my mind. I realized that I've been so focused on work that I haven't called my parents in two weeks. 부모님께 전화드려야 하는데 자꾸 미루게 되네요.
+
+Sometimes I wonder if I'm doing enough. The team at the office seems to be handling everything so well, but I feel like I'm always playing catch-up. 내일은 좀 더 여유있게 시작해봐야겠어요.`;
+            return `"${textLength === 'short' ? short : textLength === 'long' ? long : journal}"`;
           })()}
         </div>
       </div>
@@ -623,24 +473,25 @@ export default function TestAudioPage() {
         <h3 style={{ marginTop: 0 }}>What This Tests:</h3>
         <ul style={{ marginBottom: 0 }}>
           <li>API request to /api/tts</li>
-          <li><strong>MP3/WAV streaming from Cartesia, Murf.ai, ElevenLabs, or Fish Audio</strong></li>
+          <li><strong>PCM/WAV/MP3 streaming from Cartesia, Murf.ai, ElevenLabs, Fish Audio, or Gemini Flash</strong></li>
           <li>Progressive playback with Web Audio API</li>
-          <li>Early playback after buffering 512KB (all providers)</li>
-          <li>Time to first audio (target: 2-3s)</li>
+          <li>Early playback after buffering 512KB (optimized for faster start)</li>
+          <li>Time to first audio (target: 1-2s)</li>
           <li>Minimal or no gap before continuation</li>
         </ul>
         <p style={{ marginTop: '1rem', fontSize: '0.9rem', color: '#666' }}>
-          <strong>Providers:</strong> Select between Cartesia, Murf.ai, ElevenLabs, or Fish Audio to compare performance and quality.
-          <br />• <strong>Cartesia:</strong> True streaming - chunks arrive progressively (~2-3s to first audio)
-          <br />• <strong>Murf.ai (Gen2):</strong> Studio-quality speech synthesis with Miles voice (Calm style) - supports streaming
-          <br />• <strong>ElevenLabs:</strong> High-quality TTS with ultra-low latency models - supports streaming
-          <br />• <strong>Fish Audio (S1):</strong> Latest model with emotion control and voice cloning - balanced latency mode (~300ms)
+          <strong>Providers:</strong> Select between Cartesia, Murf.ai, ElevenLabs, Fish Audio, or Gemini Flash to compare performance and quality.
+          <br />• <strong>Cartesia:</strong> Raw PCM streaming - chunks arrive progressively, lowest latency (~1-2s to first audio)
+          <br />• <strong>Murf.ai (Gen2):</strong> Raw PCM streaming - Studio-quality speech synthesis with Miles voice (Calm style)
+          <br />• <strong>ElevenLabs:</strong> MP3 streaming - High-quality TTS with ultra-low latency models
+          <br />• <strong>Fish Audio (S1):</strong> WAV streaming - Latest model with emotion control and voice cloning - balanced latency mode (~300ms)
+          <br />• <strong>Gemini Flash:</strong> WAV streaming - Google's cost-effective TTS with 30+ voices (Kore voice) - balanced quality and speed
         </p>
         <p style={{ marginTop: '0.5rem', fontSize: '0.9rem', color: '#666' }}>
-          <strong>Progressive Playback:</strong> Buffers 512KB (~2-3 seconds of audio) for all providers before starting playback. All providers support true streaming with progressive chunk delivery.
+          <strong>Progressive Playback:</strong> Buffers 512KB (~1-2 seconds of audio) before starting playback. ElevenLabs chunks are automatically split into 64KB sub-chunks for smoother streaming.
         </p>
         <p style={{ marginTop: '0.5rem', fontSize: '0.9rem', color: '#666' }}>
-          <strong>Performance:</strong> Starts playing in 2-3 seconds, then plays continuously through to the end with seamless transition when the full audio takes over.
+          <strong>Performance:</strong> Starts playing in 1-2 seconds, then plays continuously through to the end with seamless transition when the full audio takes over.
         </p>
       </div>
     </div>

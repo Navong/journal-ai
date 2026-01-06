@@ -1,5 +1,5 @@
 // S3 service utility for audio storage
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME;
@@ -108,6 +108,105 @@ export async function deleteAudio(key: string): Promise<void> {
     console.log(`[S3Service] ✅ Deleted audio from S3: ${key}`);
   } catch (error) {
     console.error(`[S3Service] ❌ Failed to delete audio from S3: ${key}`, error);
+    throw error;
+  }
+}
+
+/**
+ * Check if an object exists in S3 (using HeadObject - cheap and fast)
+ * @param key - S3 object key
+ * @returns True if object exists, false otherwise
+ */
+export async function checkObjectExists(key: string): Promise<boolean> {
+  if (!BUCKET_NAME) {
+    return false;
+  }
+
+  try {
+    const command = new HeadObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: key,
+    });
+
+    await s3Client.send(command);
+    return true;
+  } catch (error: any) {
+    // 404 means object doesn't exist, which is fine
+    if (error?.$metadata?.httpStatusCode === 404) {
+      return false;
+    }
+    // Other errors (permissions, network, etc.) - log and return false
+    console.warn(`[S3Service] [HeadObject] Error checking ${key}:`, error?.message || error);
+    return false;
+  }
+}
+
+/**
+ * Download audio buffer from S3
+ * @param key - S3 object key
+ * @returns Audio buffer as Uint8Array
+ */
+export async function downloadAudio(key: string): Promise<Uint8Array> {
+  if (!BUCKET_NAME) {
+    throw new Error('S3 bucket not configured');
+  }
+
+  const downloadStartTime = Date.now();
+  console.log(`[S3Service] [Download] Starting download: ${key}...`);
+
+  try {
+    const command = new GetObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: key,
+    });
+
+    const response = await s3Client.send(command);
+    
+    if (!response.Body) {
+      throw new Error('No body in S3 response');
+    }
+
+    // Convert stream to buffer
+    const chunks: Uint8Array[] = [];
+    const stream = response.Body as any;
+    
+    // Handle different stream types
+    if (stream.transformToWebStream) {
+      const reader = stream.transformToWebStream().getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          chunks.push(value);
+        }
+      }
+    } else if (stream[Symbol.asyncIterator]) {
+      for await (const chunk of stream) {
+        chunks.push(chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk));
+      }
+    } else {
+      // Fallback: read as array buffer
+      const arrayBuffer = await stream.arrayBuffer();
+      chunks.push(new Uint8Array(arrayBuffer));
+    }
+
+    // Combine chunks
+    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const buffer = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      buffer.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    const downloadTime = Date.now() - downloadStartTime;
+    const bufferSizeKB = (buffer.length / 1024).toFixed(1);
+    console.log(`[S3Service] [Download] ✅ Download completed: ${key} (${bufferSizeKB}KB) in ${downloadTime}ms`);
+    
+    return buffer;
+  } catch (error) {
+    const downloadTime = Date.now() - downloadStartTime;
+    console.error(`[S3Service] [Download] ❌ Download failed: ${key} after ${downloadTime}ms`, error);
     throw error;
   }
 }

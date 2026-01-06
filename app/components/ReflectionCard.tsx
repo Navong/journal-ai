@@ -9,10 +9,8 @@ interface ReflectionCardProps {
   reflection: Reflection | null;
   isLoading: boolean;
   onPlay?: () => void;
-  onPause?: () => void;
   onStop?: () => void;
   isPlaying?: boolean;
-  isPaused?: boolean;
   isGeneratingVoice?: boolean;
   playbackRate?: number;
   onPlaybackRateChange?: (rate: number) => void;
@@ -22,10 +20,8 @@ export const ReflectionCard: React.FC<ReflectionCardProps> = ({
   reflection,
   isLoading,
   onPlay,
-  onPause,
   onStop,
   isPlaying,
-  isPaused,
   isGeneratingVoice,
   playbackRate = 1.0,
   onPlaybackRateChange
@@ -69,9 +65,9 @@ export const ReflectionCard: React.FC<ReflectionCardProps> = ({
               A reflection from your companion
             </div>
             {/* Playback Controls */}
-            {(onPlay || onPause) && (
+            {onPlay && (
               <div className="flex items-center gap-2 flex-shrink-0">
-                {isPlaying && !isPaused && (
+                {isPlaying && (
                   <div className="flex items-center gap-1 bg-white/80 backdrop-blur-sm rounded-full px-2 py-1 shadow-sm border border-stone-200">
                     <button
                       onClick={() => onPlaybackRateChange?.(Math.max(0.5, playbackRate - 0.25))}
@@ -96,7 +92,7 @@ export const ReflectionCard: React.FC<ReflectionCardProps> = ({
                 {/* Single Play/Stop Toggle Button */}
                 <button
                   onClick={() => {
-                    if (isPlaying && !isPaused) {
+                    if (isPlaying) {
                       onStop?.();
                     } else {
                       onPlay?.();
@@ -105,16 +101,16 @@ export const ReflectionCard: React.FC<ReflectionCardProps> = ({
                   disabled={isGeneratingVoice}
                   className={`
                     relative transition-all duration-300 ease-in-out
-                    p-2.5 md:p-2 rounded-full 
-                    active:scale-90 touch-manipulation 
-                    min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 
+                    p-2.5 md:p-2 rounded-full
+                    active:scale-90 touch-manipulation
+                    min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0
                     flex items-center justify-center
                     ${isGeneratingVoice
                       ? 'bg-stone-100 text-stone-300 cursor-not-allowed opacity-50'
                       : 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100 hover:scale-105'
                     }
                   `}
-                  title={isGeneratingVoice ? "Generating..." : (isPlaying && !isPaused ? "Stop" : "Play")}
+                  title={isGeneratingVoice ? "Generating..." : (isPlaying ? "Stop" : "Play")}
                 >
                   {isGeneratingVoice ? (
                     <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
@@ -124,30 +120,30 @@ export const ReflectionCard: React.FC<ReflectionCardProps> = ({
                   ) : (
                     <div className="relative w-4 h-4">
                       {/* Play Icon */}
-                      <svg 
-                        xmlns="http://www.w3.org/2000/svg" 
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
                         className={`absolute inset-0 h-4 w-4 transition-all duration-300 ease-in-out ${
-                          isPlaying && !isPaused 
-                            ? 'opacity-0 scale-0 rotate-90' 
+                          isPlaying
+                            ? 'opacity-0 scale-0 rotate-90'
                             : 'opacity-100 scale-100 rotate-0'
                         }`}
-                        fill="none" 
-                        viewBox="0 0 24 24" 
+                        fill="none"
+                        viewBox="0 0 24 24"
                         stroke="currentColor"
                       >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                       {/* Stop Icon */}
-                      <svg 
-                        xmlns="http://www.w3.org/2000/svg" 
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
                         className={`absolute inset-0 h-4 w-4 transition-all duration-300 ease-in-out ${
-                          isPlaying && !isPaused 
-                            ? 'opacity-100 scale-100 rotate-0' 
+                          isPlaying
+                            ? 'opacity-100 scale-100 rotate-0'
                             : 'opacity-0 scale-0 -rotate-90'
                         }`}
-                        fill="none" 
-                        viewBox="0 0 24 24" 
+                        fill="none"
+                        viewBox="0 0 24 24"
                         stroke="currentColor"
                       >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />

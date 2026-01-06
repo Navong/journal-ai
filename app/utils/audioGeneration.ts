@@ -98,11 +98,11 @@ export async function streamToBase64(stream: ReadableStream<Uint8Array>): Promis
 }
 
 /**
- * Generate speech and return raw streaming audio (ReadableStream)
+ * Generate speech and return raw streaming audio (Response)
  * This bypasses base64 conversion for true progressive playback
- * Use this for immediate playback with createProgressiveAudioPlayer
+ * Use this for immediate playback with AudioStreamPlayer
  */
-async function generateSpeechStreamInternal(text: string): Promise<ReadableStream<Uint8Array> | undefined> {
+async function generateSpeechStreamInternal(text: string): Promise<Response | undefined> {
   // Directly call the JournalAIService for the actual speech stream generation
   return fetchSpeechStream(text);
 }
@@ -165,10 +165,10 @@ export const generateSpeech = async (
     if (chunks.length === 1) {
       // Single chunk, no need for chunking
       const request = generateSpeechStreamInternal(chunks[0]);
-      const promiseResult = request.then(async (stream) => {
-        if (!stream) return undefined;
+      const promiseResult = request.then(async (response) => {
+        if (!response || !response.body) return undefined;
         // Stream will be played progressively by JournalApp, but for caching we need base64
-        const base64 = await streamToBase64(stream);
+        const base64 = await streamToBase64(response.body);
         return base64;
       });
       pendingTTSRequests.set(textHash, promiseResult);
@@ -205,9 +205,9 @@ export const generateSpeech = async (
       }
 
       const request = generateSpeechStreamInternal(chunk);
-      const promiseResult = request.then(async (stream) => {
-        if (!stream) return undefined;
-        const base64 = await streamToBase64(stream);
+      const promiseResult = request.then(async (response) => {
+        if (!response || !response.body) return undefined;
+        const base64 = await streamToBase64(response.body);
         return base64;
       });
       pendingTTSRequests.set(chunkHash, promiseResult);
@@ -249,9 +249,9 @@ export const generateSpeech = async (
 
   // Single generation
   const request = generateSpeechStreamInternal(text);
-  const promiseResult = request.then(async (stream) => {
-    if (!stream) return undefined;
-    const base64 = await streamToBase64(stream);
+  const promiseResult = request.then(async (response) => {
+    if (!response || !response.body) return undefined;
+    const base64 = await streamToBase64(response.body);
     return base64;
   });
   pendingTTSRequests.set(textHash, promiseResult);
