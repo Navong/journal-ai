@@ -109,8 +109,22 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Generate S3 cache key from text + provider + format
-        const cacheKey = `tts_full/${hashTTSInput(processedText + providerType + (formatParam || 'wav'))}.wav`;
+        // Generate S3 cache key
+        // IMPORTANT: Use original 'text' (not 'processedText') to match client-side key generation
+        // Provider-specific modifications (e.g., Fish emotion tags) should not affect cache key
+        let cacheKey: string;
+        if (entryId && prisma) {
+            // For journal entries, use user-specific key: audio/{userId}/{hash}.wav
+            // Must match client-side generateAudioS3Key logic exactly
+            const voiceId = '694f9389-aac1-45b6-b726-9d9369183238'; // Same default as client-side
+            const textHash = hashTTSInput(text, voiceId);
+            cacheKey = `audio/${userId}/${textHash}.wav`;
+            console.log(`[TTS API] Using journal-specific S3 key: ${cacheKey} (voiceId: ${voiceId})`);
+        } else {
+            // For general TTS requests, use generic cache
+            cacheKey = `tts_full/${hashTTSInput(text + providerType + (formatParam || 'wav'))}.wav`;
+            console.log(`[TTS API] Using generic TTS cache key: ${cacheKey}`);
+        }
 
         // PHASE 1: Check S3 cache (skip if skipCache=true)
         if (isS3Configured() && !skipCache) {

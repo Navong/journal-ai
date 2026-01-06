@@ -318,16 +318,20 @@ export const AudioManager: React.FC<AudioManagerProps> = ({
         if (audioData instanceof Response) {
             try {
                 const contentType = audioData.headers.get('Content-Type') || '';
+                const sampleRateHeader = audioData.headers.get('X-Audio-Sample-Rate');
+                const sampleRate = sampleRateHeader ? parseInt(sampleRateHeader, 10) : 44100;
+
+                // Dynamically determine format from Content-Type (like test page)
                 const audioFormat: AudioFormat = format || (
                     contentType.includes('audio/L16') ? 'pcm' :
                         contentType.includes('audio/wav') ? 'wav' :
                             contentType.includes('audio/mpeg') ? 'mp3' : 'wav'
                 );
 
-                console.log(`[AudioManager] Creating AudioStreamPlayer (format: ${audioFormat})`);
+                console.log(`[AudioManager] Creating AudioStreamPlayer (format: ${audioFormat}, sampleRate: ${sampleRate}Hz)`);
                 const player = new AudioStreamPlayer({
                     format: audioFormat,
-                    sampleRate: 44100,
+                    sampleRate: sampleRate,
                     onLog: (msg) => console.log(`[AudioPlayer] ${msg}`),
                     onStatusChange: (status) => console.log(`[AudioPlayer] Status: ${status}`)
                 });
@@ -491,7 +495,7 @@ export const AudioManager: React.FC<AudioManagerProps> = ({
         }
     };
 
-    const handleTogglePlayback = async (text: string, id: string = 'main') => {
+    const handleTogglePlayback = async (text: string, id: string = 'main', entryId?: string) => {
         console.log('[AudioManager] handleTogglePlayback called');
 
         ensureAudioContext();
@@ -516,7 +520,8 @@ export const AudioManager: React.FC<AudioManagerProps> = ({
             setGeneratingAudioId(id);
             try {
                 console.log('[AudioManager] Generating streaming audio for reflection...');
-                const audioStream = await generateSpeechStream(text, id === 'main' ? undefined : id);
+                // Pass entryId for journal entries, use id for other cases
+                const audioStream = await generateSpeechStream(text, entryId);
 
                 if (audioStream) {
                     console.log('[AudioManager] Audio stream received, starting progressive playback...');
@@ -705,7 +710,7 @@ export const AudioManager: React.FC<AudioManagerProps> = ({
         playAudio,
         stopCurrentAudio,
         setPlaybackSpeed,
-        handleTogglePlayback,
+        handleTogglePlayback: (text: string, id?: string, entryId?: string) => handleTogglePlayback(text, id, entryId),
         handleHistoryAudioPlayback,
         handleToggleChatPlayback,
     };

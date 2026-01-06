@@ -215,7 +215,7 @@ const JournalApp: React.FC = () => {
       // Auto-generate audio if auto-play is enabled
       if (autoPlayEnabled) {
         console.log('[JournalApp] Auto-generating audio because auto-play is enabled');
-        audioProps.handleTogglePlayback(content, 'main');
+        audioProps.handleTogglePlayback(content, 'main', newId);
       }
 
       setTimeout(() => {

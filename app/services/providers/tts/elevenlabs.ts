@@ -44,7 +44,7 @@ export class ElevenLabsTTSProvider implements TTSProvider {
         // Default voice ID - can be overridden via env var
         // Popular voices: 21m00Tcm4TlvDq8ikWAM (Rachel), pNInz6obpgDQGcFmaJgB (Adam)
         // See: https://elevenlabs.io/docs/api-reference/get-voices
-        this.voiceId = process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM'; // Rachel (default)
+        this.voiceId = process.env.ELEVENLABS_VOICE_ID || 'JBFqnCBsd6RMkjVDRZzb'; // Rachel (default)
         // Default model - can be overridden via env var
         // Options: eleven_multilingual_v2, eleven_turbo_v2_5, eleven_flash_v2_5
         this.model = process.env.ELEVENLABS_MODEL || 'eleven_multilingual_v2';
@@ -81,34 +81,64 @@ export class ElevenLabsTTSProvider implements TTSProvider {
                 const totalTimeToResponse = Date.now() - requestStartTime;
                 log.debug(`[TTS API] ⏱️ SDK stream obtained in ${fetchTime}ms (total: ${totalTimeToResponse}ms from request start)`);
 
+                // Simplified and more robust streaming implementation
                 // The SDK returns an async iterable of chunks with audioBase64
-                // Stream chunks progressively as they arrive (don't wait for all chunks)
-                const outputFormat = this.outputFormat; // Capture for use in stream callback
+                const outputFormat = this.outputFormat;
+                const isMP3 = outputFormat.startsWith('mp3');
+
                 const stream = new ReadableStream({
                     async start(controller) {
+                        let streamClosed = false;
+                        let streamErrored = false;
+
+                        const safeEnqueue = (chunk: Uint8Array) => {
+                            if (!streamClosed && !streamErrored) {
+                                try {
+                                    controller.enqueue(chunk);
+                                } catch (e: any) {
+                                    log.warn('[TTS API] Failed to enqueue chunk:', e?.message || String(e));
+                                    streamClosed = true;
+                                }
+                            }
+                        };
+
+                        const safeClose = () => {
+                            if (!streamClosed && !streamErrored) {
+                                try {
+                                    controller.close();
+                                    streamClosed = true;
+                                } catch (e: any) {
+                                    log.warn('[TTS API] Failed to close stream:', e?.message || String(e));
+                                }
+                            }
+                        };
+
+                        const safeError = (error: any) => {
+                            if (!streamErrored && !streamClosed) {
+                                try {
+                                    controller.error(error);
+                                    streamErrored = true;
+                                } catch (e: any) {
+                                    log.warn('[TTS API] Failed to error stream:', e?.message || String(e));
+                                }
+                            }
+                        };
+
                         try {
                             let chunkCount = 0;
-                            const streamStartTime = Date.now();
-                            let firstChunkTime: number | null = null;
-                            let firstChunkSentTime: number | null = null;
                             let totalBytes = 0;
-                            const isMP3 = outputFormat.startsWith('mp3');
-
-                            // For MP3, we can stream directly. For PCM, we need to accumulate and convert to WAV at the end.
                             const pcmChunks: Uint8Array[] = [];
 
-                            // Iterate over the SDK stream and send chunks immediately
-                            for await (const chunk of streamResponse) {
-                                if (firstChunkTime === null) {
-                                    firstChunkTime = Date.now();
-                                    const firstChunkLatency = firstChunkTime - requestStartTime;
-                                    const timeFromFetch = firstChunkTime - fetchStartTime;
-                                    log.debug(`[TTS API] ⚡ First audio chunk received: ${firstChunkLatency}ms from request start, ${timeFromFetch}ms from SDK call`);
-                                }
+                            // Add timeout for long streams (5 minutes max)
+                            const timeout = setTimeout(() => {
+                                log.warn('[TTS API] Stream timeout reached');
+                                safeError(new Error('Stream timeout'));
+                            }, 5 * 60 * 1000);
 
-                                // Extract base64 audio from chunk (SDK uses camelCase)
+                            for await (const chunk of streamResponse) {
+                                if (streamClosed || streamErrored) break;
+
                                 if (chunk.audioBase64) {
-                                    // Decode base64 audio data
                                     const base64Data = chunk.audioBase64;
                                     const binaryString = atob(base64Data);
                                     const audioBytes = new Uint8Array(binaryString.length);
@@ -120,142 +150,47 @@ export class ElevenLabsTTSProvider implements TTSProvider {
                                     totalBytes += audioBytes.length;
 
                                     if (isMP3) {
-                                        // For MP3, break large chunks into smaller pieces for better progressive playback
-                                        // Target: ~64KB sub-chunks for smoother streaming
-                                        const SUB_CHUNK_SIZE = 64 * 1024; // 64KB sub-chunks
-
-                                        if (audioBytes.length > SUB_CHUNK_SIZE) {
-                                            // Large chunk - split into smaller pieces
-                                            let offset = 0;
-                                            let subChunkCount = 0;
-                                            while (offset < audioBytes.length) {
-                                                const subChunk = audioBytes.slice(offset, Math.min(offset + SUB_CHUNK_SIZE, audioBytes.length));
-
-                                                if (firstChunkSentTime === null) {
-                                                    firstChunkSentTime = Date.now();
-                                                    const timeToFirstChunkSent = firstChunkSentTime - requestStartTime;
-                                                    log.debug(`[TTS API] 🎵 First MP3 sub-chunk sent to client: ${timeToFirstChunkSent}ms from request start`);
-                                                }
-
-                                                controller.enqueue(subChunk);
-                                                offset += SUB_CHUNK_SIZE;
-                                                subChunkCount++;
-                                            }
-
-                                            // Log progress for split chunks
-                                            if (chunkCount <= 5 || chunkCount % 20 === 0) {
-                                                const elapsed = Date.now() - streamStartTime;
-                                                const rate = (totalBytes / 1024) / (elapsed / 1000);
-                                                log.debug(`[TTS API] Chunk ${chunkCount}: ${audioBytes.length} bytes MP3 (split into ${subChunkCount} sub-chunks), total: ${(totalBytes / 1024).toFixed(0)}KB, rate: ${rate.toFixed(2)}KB/s`);
-                                            }
-                                        } else {
-                                            // Small chunk - send as-is
-                                            if (firstChunkSentTime === null) {
-                                                firstChunkSentTime = Date.now();
-                                                const timeToFirstChunkSent = firstChunkSentTime - requestStartTime;
-                                                log.debug(`[TTS API] 🎵 First MP3 chunk sent to client: ${timeToFirstChunkSent}ms from request start`);
-                                            }
-
-                                            const enqueueStart = Date.now();
-                                            controller.enqueue(audioBytes);
-                                            const enqueueTime = Date.now() - enqueueStart;
-
-                                            // Log progress
-                                            if (chunkCount <= 5 || chunkCount % 50 === 0) {
-                                                const elapsed = Date.now() - streamStartTime;
-                                                const rate = (totalBytes / 1024) / (elapsed / 1000);
-                                                log.debug(`[TTS API] Chunk ${chunkCount}: ${audioBytes.length} bytes MP3, total: ${(totalBytes / 1024).toFixed(0)}KB, rate: ${rate.toFixed(2)}KB/s (enqueue: ${enqueueTime}ms)`);
-                                            }
-                                        }
+                                        // Stream MP3 chunks directly
+                                        safeEnqueue(audioBytes);
                                     } else {
-                                        // For PCM, accumulate chunks (need to convert to WAV at the end)
+                                        // Accumulate PCM for WAV conversion
                                         pcmChunks.push(audioBytes);
+                                    }
 
-                                        // Log progress
-                                        if (chunkCount <= 5 || chunkCount % 50 === 0) {
-                                            const elapsed = Date.now() - streamStartTime;
-                                            const rate = (totalBytes / 1024) / (elapsed / 1000);
-                                            log.debug(`[TTS API] Chunk ${chunkCount}: ${audioBytes.length} bytes PCM, total: ${(totalBytes / 1024).toFixed(0)}KB, rate: ${rate.toFixed(2)}KB/s`);
-                                        }
+                                    // Log progress occasionally
+                                    if (chunkCount <= 3 || chunkCount % 10 === 0) {
+                                        log.debug(`[TTS API] Chunk ${chunkCount}: ${(audioBytes.length / 1024).toFixed(1)}KB (${isMP3 ? 'MP3' : 'PCM'})`);
                                     }
                                 }
                             }
+
+                            clearTimeout(timeout);
 
                             if (totalBytes === 0) {
                                 throw new Error('No audio data received from ElevenLabs');
                             }
 
                             if (isMP3) {
-                                // MP3 chunks already sent, just close the stream
-                                controller.close();
-
-                                const streamTime = Date.now() - streamStartTime;
-                                const totalTime = Date.now() - requestStartTime;
-                                const finalRate = (totalBytes / 1024) / (streamTime / 1000);
-                                const avgRate = (totalBytes / 1024) / (totalTime / 1000);
-
-                                log.debug(`[TTS API] ✅ Stream complete: ${chunkCount} MP3 chunks, ${(totalBytes / 1024).toFixed(0)}KB in ${streamTime}ms`);
-                                log.debug(`[TTS API] 📊 Performance: ${finalRate.toFixed(2)}KB/s streaming rate, ${avgRate.toFixed(2)}KB/s average`);
-                                log.debug(`[TTS API] ⏱️ Total latency: ${totalTime}ms from request start (fetch: ${fetchTime}ms, stream: ${streamTime}ms)`);
-
-                                if (firstChunkTime) {
-                                    const timeToFirstAudio = firstChunkTime - requestStartTime;
-                                    log.debug(`[TTS API] 🚀 Time to first audio chunk: ${timeToFirstAudio}ms`);
-                                }
+                                safeClose();
+                                log.debug(`[TTS API] ✅ MP3 stream complete: ${chunkCount} chunks, ${(totalBytes / 1024).toFixed(1)}KB`);
                             } else {
-                                // For PCM, convert all accumulated chunks to WAV
-                                const alignedPcmBytes = totalBytes % 2 === 0 ? totalBytes : totalBytes - 1;
-                                if (alignedPcmBytes !== totalBytes) {
-                                    log.warn(`[TTS API] PCM data length ${totalBytes} is odd, aligning to ${alignedPcmBytes} bytes`);
-                                }
-
-                                const pcmData = new Uint8Array(alignedPcmBytes);
+                                // Convert PCM to WAV
+                                const pcmData = new Uint8Array(totalBytes);
                                 let offset = 0;
-                                let bytesCopied = 0;
                                 for (const chunk of pcmChunks) {
-                                    const bytesToCopy = Math.min(chunk.length, alignedPcmBytes - bytesCopied);
-                                    if (bytesToCopy > 0) {
-                                        pcmData.set(chunk.slice(0, bytesToCopy), offset);
-                                        offset += bytesToCopy;
-                                        bytesCopied += bytesToCopy;
-                                    }
-                                    if (bytesCopied >= alignedPcmBytes) break;
+                                    pcmData.set(chunk, offset);
+                                    offset += chunk.length;
                                 }
 
-                                log.debug(`[TTS API] Converting ${(alignedPcmBytes / 1024).toFixed(0)}KB PCM to WAV (${alignedPcmBytes} bytes, ${alignedPcmBytes / 2} samples)...`);
-                                const convertStart = Date.now();
                                 const wavData = pcmToWav(pcmData, 44100, 1);
-                                const convertTime = Date.now() - convertStart;
-                                log.debug(`[TTS API] WAV conversion completed in ${convertTime}ms: ${(wavData.length / 1024).toFixed(0)}KB (header: 44 bytes, data: ${alignedPcmBytes} bytes)`);
-
-                                // Send the complete WAV file
-                                const enqueueStart = Date.now();
-                                controller.enqueue(wavData);
-                                const enqueueTime = Date.now() - enqueueStart;
-
-                                const firstChunkSentTime = Date.now();
-                                const timeToFirstChunkSent = firstChunkSentTime - requestStartTime;
-                                log.debug(`[TTS API] 🎵 WAV sent to client: ${timeToFirstChunkSent}ms from request start (enqueue: ${enqueueTime}ms)`);
-
-                                controller.close();
-
-                                const streamTime = Date.now() - streamStartTime;
-                                const totalTime = Date.now() - requestStartTime;
-                                const finalRate = (wavData.length / 1024) / (streamTime / 1000);
-                                const avgRate = (wavData.length / 1024) / (totalTime / 1000);
-
-                                log.debug(`[TTS API] ✅ Stream complete: ${chunkCount} PCM chunks, ${(wavData.length / 1024).toFixed(0)}KB WAV in ${streamTime}ms`);
-                                log.debug(`[TTS API] 📊 Performance: ${finalRate.toFixed(2)}KB/s streaming rate, ${avgRate.toFixed(2)}KB/s average`);
-                                log.debug(`[TTS API] ⏱️ Total latency: ${totalTime}ms from request start (fetch: ${fetchTime}ms, stream: ${streamTime}ms, convert: ${convertTime}ms)`);
-
-                                if (firstChunkTime) {
-                                    const timeToFirstAudio = firstChunkTime - requestStartTime;
-                                    log.debug(`[TTS API] 🚀 Time to first audio chunk: ${timeToFirstAudio}ms`);
-                                }
+                                safeEnqueue(wavData);
+                                safeClose();
+                                log.debug(`[TTS API] ✅ PCM stream complete: ${chunkCount} chunks, ${(wavData.length / 1024).toFixed(1)}KB WAV`);
                             }
                         } catch (error: any) {
-                            log.error('[TTS API] Stream error:', error);
-                            controller.error(error);
+                            clearTimeout(timeout);
+                            log.error('[TTS API] Stream error:', error.message);
+                            safeError(error);
                             throw error;
                         }
                     }
@@ -369,4 +304,3 @@ function pcmToWav(pcmData: Uint8Array, sampleRate: number = 44100, channels: num
 
     return wavFile;
 }
-
