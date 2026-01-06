@@ -54,6 +54,7 @@ export interface HistoryEntry {
   timestamp: string;
   chatHistory?: ChatMessage[];
   audioBase64?: string | string[]; // Store audio for history entries
+  audioS3Key?: string; // S3 key for audio storage (new storage method)
   entities?: ExtractedEntities; // Extracted entities (people, places, events, organizations)
   highlights?: Highlight[]; // AI-detected phrases to highlight in reflection text
 }

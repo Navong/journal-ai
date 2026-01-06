@@ -350,7 +350,13 @@ export class AudioStreamPlayer {
 
       if (this.options.format === 'pcm') {
         completeAudioBuffer = this.pcmToAudioBuffer(completeBuffer, 1);
+      } else if (this.options.format === 'wav') {
+        // WAV format: Extract PCM data (skip 44-byte header) and convert manually
+        // This is more reliable than decodeAudioData for streamed WAV where header size may not match
+        const pcmData = completeBuffer.slice(44);
+        completeAudioBuffer = this.pcmToAudioBuffer(pcmData, 1);
       } else {
+        // MP3 format - use decodeAudioData
         completeAudioBuffer = await this.audioContext!.decodeAudioData(completeBuffer.buffer.slice(0));
       }
 
@@ -378,7 +384,7 @@ export class AudioStreamPlayer {
         this.options.onLog(`Waiting for ${segmentIndex} segment(s) to finish...`);
         await segmentProcessingPromise;
         if (lastPlaybackPromise) {
-          await lastPlaybackPromise;
+          await lastPlaybackPromise; // Wait for last segment to finish before playing remaining audio
         }
 
         // Play remaining audio from where segments left off

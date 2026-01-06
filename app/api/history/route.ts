@@ -60,6 +60,7 @@ export async function GET(request: NextRequest) {
         entities: true, // Include entities (people, places, events)
         highlights: true, // Include AI-detected highlights
         audioData: includeAudio, // Only fetch audio if explicitly requested
+        audioS3Key: true, // Include S3 key for audio storage
         createdAt: true,
         updatedAt: true,
       },
@@ -162,6 +163,7 @@ export async function POST(request: NextRequest) {
             entities: entryData.entities || null, // Save extracted entities (people, places, events)
             highlights: entryData.highlights || null, // Save AI-detected highlights for UI
             audioData: entryData.audio_data || null,
+            audioS3Key: entryData.audio_s3_key || null, // Save S3 key for audio storage
             createdAt: entryData.created_at ? new Date(entryData.created_at) : new Date(),
           },
           update: {
@@ -176,6 +178,8 @@ export async function POST(request: NextRequest) {
             // If audio_data field is missing/undefined, don't update audio field (preserves existing audio)
             // This prevents overwriting audio when syncing from device without audio in memory
             ...(entryData.audio_data !== undefined && entryData.audio_data !== null && { audioData: entryData.audio_data }),
+            // Update S3 key if provided (even if null to allow clearing)
+            ...(entryData.audio_s3_key !== undefined && { audioS3Key: entryData.audio_s3_key }),
           },
         });
 
