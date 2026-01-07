@@ -193,6 +193,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             {displayedHistory.map((item) => {
             const isExpanded = expandedEntries.has(item.id);
             const isLongEntry = item.text.length > 250 || (item.text.match(/\n/g) || []).length > 2;
+            const isLongReflection = item.reflection.length > 400 || (item.reflection.match(/\n/g) || []).length > 3;
 
             return (
               <article key={item.id} className="border-l-2 border-stone-300 pl-6 md:pl-10 relative group">
@@ -204,7 +205,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     <AlertDialog.Trigger asChild>
                       <button
                         onClick={() => setDeleteDialogId(item.id)}
-                        className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-full text-stone-400 hover:text-rose-600 hover:bg-rose-50 active:scale-90"
+                        className="absolute top-0 right-0 p-2 rounded-full text-stone-400 hover:text-rose-600 hover:bg-rose-50 active:scale-90 transition-all"
                         title="Delete entry"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 md:h-5 md:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -267,12 +268,15 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 )}
 
                 {/* Journal Entry with Truncation */}
-                <div className="mb-5 md:mb-6 relative">
+                <div className="mb-5 md:mb-6">
                   <div className={`
-                    text-stone-800 font-serif leading-relaxed whitespace-pre-wrap text-sm md:text-base transition-all duration-300
-                    ${!isExpanded && isLongEntry ? 'line-clamp-3 overflow-hidden mask-fade-bottom' : ''}
+                    relative text-stone-800 font-serif leading-relaxed whitespace-pre-wrap text-sm md:text-base transition-all duration-300
+                    ${!isExpanded && isLongEntry ? 'max-h-[100px] md:max-h-[120px] overflow-hidden' : ''}
                   `}>
                     {item.text}
+                    {!isExpanded && isLongEntry && (
+                      <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-[#FDFCF8] via-[#FDFCF8]/95 to-transparent pointer-events-none"></div>
+                    )}
                   </div>
 
                   {isLongEntry && (
@@ -291,14 +295,38 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
                 {/* Reflection Card */}
                 <div className="bg-[#F2F6F3] p-4 md:p-6 rounded-xl md:rounded-2xl border border-emerald-100/50 text-stone-800 font-serif text-sm md:text-base leading-relaxed mb-3 md:mb-4 shadow-sm">
-                  <HighlightedText 
-                    content={item.reflection} 
-                    highlights={item.highlights}
-                  />
-                  {/* Audio Playback Buttons */}
-                  {onPlayAudio && (
-                    <div className="mt-3 md:mt-4 flex justify-end">
-                      {(() => {
+                  <div className={`
+                    relative transition-all duration-300
+                    ${!isExpanded && isLongReflection ? 'max-h-[200px] md:max-h-[240px] overflow-hidden' : ''}
+                  `}>
+                    <HighlightedText
+                      content={item.reflection}
+                      highlights={item.highlights}
+                    />
+                    {!isExpanded && isLongReflection && (
+                      <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-[#F2F6F3] via-[#F2F6F3]/90 to-transparent pointer-events-none"></div>
+                    )}
+                  </div>
+
+                  {/* Actions Row: Read More + Audio Playback */}
+                  {(isLongReflection || onPlayAudio) && (
+                    <div className="mt-4 flex items-center justify-between">
+                      {/* Read More Button */}
+                      {isLongReflection && (
+                        <button
+                          onClick={() => toggleExpand(item.id)}
+                          className="text-xs md:text-sm font-bold text-emerald-700 uppercase tracking-widest hover:text-emerald-900 transition-colors flex items-center gap-1.5 group py-1.5"
+                        >
+                          {isExpanded ? (
+                            <>Show less <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg></>
+                          ) : (
+                            <>Read more <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 group-hover:translate-y-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg></>
+                          )}
+                        </button>
+                      )}
+
+                      {/* Audio Playback Button */}
+                      {onPlayAudio && (() => {
                         const audioId = `history-${item.id}`;
                         const isThisAudioActive = isPlaying && activeAudioId === audioId;
                         const isThisGenerating = isGeneratingVoice && generatingAudioId === audioId;
@@ -307,7 +335,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                           <button
                             onClick={() => {
                               if (isThisAudioActive) {
-                                onPlayAudio?.('', audioId); // Call with empty text to trigger stop
+                                onPlayAudio?.('', audioId);
                               } else {
                                 onPlayAudio?.(item.reflection, audioId);
                               }
@@ -315,9 +343,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                             disabled={isThisGenerating}
                             className={`
                               relative transition-all duration-300 ease-in-out
-                              p-2.5 md:p-2 rounded-full 
-                              active:scale-90 touch-manipulation 
-                              min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 
+                              p-2.5 md:p-2 rounded-full
+                              active:scale-90 touch-manipulation
+                              min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0
                               flex items-center justify-center
                               ${isThisGenerating
                                 ? 'bg-stone-100 text-stone-300 cursor-not-allowed opacity-50'
@@ -377,13 +405,21 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                   <div className="mt-6 space-y-3 md:space-y-4 border-t border-stone-200 pt-5">
                     <h4 className="text-[10px] md:text-xs text-stone-600 font-bold uppercase tracking-widest mb-2 px-1">Follow-up Conversation</h4>
                     <div className="space-y-2 md:space-y-3">
-                      {item.chatHistory.map((chat, idx) => (
-                        <div key={idx} className={`flex flex-col ${chat.role === 'model' ? 'items-start' : 'items-end'}`}>
-                          <div className={`px-4 md:px-5 py-3 rounded-xl md:rounded-2xl text-sm md:text-base leading-relaxed ${chat.role === 'model' ? 'bg-emerald-50 text-emerald-900 font-serif italic border border-emerald-200/50 shadow-sm' : 'bg-stone-100 text-stone-800 border border-stone-200 shadow-sm'}`}>
-                            {chat.role === 'model' ? <ReactMarkdown>{chat.text}</ReactMarkdown> : <span className="whitespace-pre-wrap">{chat.text}</span>}
+                      {item.chatHistory.map((chat, idx) => {
+                        const isLongChat = chat.text.length > 300;
+                        return (
+                          <div key={idx} className={`flex flex-col ${chat.role === 'model' ? 'items-start' : 'items-end'}`}>
+                            <div className={`relative px-4 md:px-5 py-3 rounded-xl md:rounded-2xl text-sm md:text-base leading-relaxed max-w-[90%] md:max-w-[85%] ${chat.role === 'model' ? 'bg-emerald-50 text-emerald-900 font-serif italic border border-emerald-200/50 shadow-sm' : 'bg-stone-100 text-stone-800 border border-stone-200 shadow-sm'}`}>
+                              <div className={`${!isExpanded && isLongChat ? 'max-h-[150px] overflow-hidden relative' : ''}`}>
+                                {chat.role === 'model' ? <ReactMarkdown>{chat.text}</ReactMarkdown> : <span className="whitespace-pre-wrap">{chat.text}</span>}
+                                {!isExpanded && isLongChat && (
+                                  <div className={`absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t ${chat.role === 'model' ? 'from-emerald-50 via-emerald-50/95' : 'from-stone-100 via-stone-100/95'} to-transparent pointer-events-none`}></div>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}

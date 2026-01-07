@@ -10,6 +10,8 @@ export default function TestStreamPage() {
   const [streamingText, setStreamingText] = useState<string>('');
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [finalResult, setFinalResult] = useState<any>(null);
+  const [progressStage, setProgressStage] = useState<string>('');
+  const [progressMessage, setProgressMessage] = useState<string>('');
 
   const handleTestStream = useCallback(async () => {
     if (!entry.trim()) return;
@@ -17,6 +19,8 @@ export default function TestStreamPage() {
     setIsStreaming(true);
     setStreamingText('');
     setFinalResult(null);
+    setProgressStage('');
+    setProgressMessage('');
 
     try {
       const streamingCallback: StreamingCallback = (chunk) => {
@@ -34,15 +38,21 @@ export default function TestStreamPage() {
         streamingCallback,
         (progress) => {
           console.log('Progress:', progress);
+          setProgressStage(progress.stage);
+          setProgressMessage(progress.message);
         }
       );
 
       setFinalResult(result);
       setIsStreaming(false);
+      setProgressStage('');
+      setProgressMessage('');
       showToast('Streaming test completed!', 'success');
     } catch (error) {
       console.error('Streaming test failed:', error);
       setIsStreaming(false);
+      setProgressStage('');
+      setProgressMessage('');
       showToast('Streaming test failed', 'error');
     }
   }, [entry]);
@@ -90,6 +100,27 @@ export default function TestStreamPage() {
             </button>
           </div>
         </div>
+
+        {/* Progress Section */}
+        {progressStage && (
+          <div className="bg-gradient-to-r from-blue-50 to-emerald-50 border border-blue-200 rounded-lg p-5 shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <div className="w-6 h-6 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                <div className="absolute inset-0 w-6 h-6 border-3 border-emerald-300 border-t-transparent rounded-full animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1s' }}></div>
+              </div>
+              <div className="flex-1">
+                <div className="text-base font-semibold text-blue-900 capitalize mb-1">
+                  {progressStage.replace(/_/g, ' ')}
+                </div>
+                <div className="text-sm text-blue-700">{progressMessage}</div>
+              </div>
+              <div className="text-xs text-blue-600 font-mono bg-white px-2 py-1 rounded">
+                {progressStage}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Streaming Output Section */}
         {(streamingText || isStreaming) && (

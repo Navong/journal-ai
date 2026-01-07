@@ -1164,9 +1164,10 @@ Please provide your reflection and a concise summary.
 
       for await (const chunk of streamingResponse) {
         const chunkText = chunk.text || '';
+
         if (chunkText) {
-          accumulatedText = chunkText; // Replace, don't append - Gemini sends full text each time
-          lastValidText = chunkText; // Keep track of the last valid text
+          accumulatedText += chunkText; // Append delta chunks from streaming
+          lastValidText = accumulatedText; // Keep track of the accumulated result
         }
 
         // Check if streaming is complete by looking at candidates
@@ -1179,21 +1180,61 @@ Please provide your reflection and a concise summary.
           }
         }
 
-        // Try to parse JSON from current chunk
+        // Try to extract reflection text from current chunk (even if JSON is incomplete)
         if (accumulatedText) {
+          // Try parsing complete JSON first
+          let currentReflectionText = '';
           try {
             const parsed = JSON.parse(accumulatedText);
-            if (parsed.reflection && parsed.reflection !== lastReflectionText) {
-              // Send chunk to callback only if reflection text has changed
-              await onChunk({
-                text: parsed.reflection,
-                isComplete: false
-              });
-              lastReflectionText = parsed.reflection;
-            }
+            currentReflectionText = parsed.reflection || '';
           } catch (parseError) {
-            // JSON is incomplete, continue
-            log.debug('JSON parsing failed, continuing', { accumulatedLength: accumulatedText.length });
+            // JSON is incomplete, try to extract reflection text with regex
+            // Look for "reflection": "..." pattern - match even without closing quote for progressive streaming
+            // First try with closing quote (complete)
+            let reflectionMatch = accumulatedText.match(/"reflection"\s*:\s*"((?:[^"\\]|\\.)*)"/s);
+
+            // If no match, try without closing quote (incomplete/streaming)
+            if (!reflectionMatch) {
+              reflectionMatch = accumulatedText.match(/"reflection"\s*:\s*"((?:[^"\\]|\\.)*)/s);
+            }
+
+            if (reflectionMatch && reflectionMatch[1]) {
+              // Unescape the JSON string
+              try {
+                currentReflectionText = JSON.parse('"' + reflectionMatch[1] + '"');
+              } catch (unescapeError) {
+                // If unescape fails, the string might be incomplete, use raw match
+                currentReflectionText = reflectionMatch[1]
+                  .replace(/\\n/g, '\n')
+                  .replace(/\\"/g, '"')
+                  .replace(/\\\\/g, '\\');
+              }
+            }
+          }
+
+          // Send only the NEW text (delta) to avoid duplication
+          if (currentReflectionText && currentReflectionText !== lastReflectionText) {
+            const newText = currentReflectionText.substring(lastReflectionText.length);
+            if (newText) {
+              // Send character-by-character with delay for typewriter effect
+              const CHAR_DELAY_MS = 45; // Adjust this for speed (lower = faster)
+              const CHUNK_SIZE = 4; // Send 4 characters at a time for smoother effect
+
+              for (let i = 0; i < newText.length; i += CHUNK_SIZE) {
+                const chunk = newText.substring(i, i + CHUNK_SIZE);
+                await onChunk({
+                  text: chunk,
+                  isComplete: false
+                });
+
+                // Add delay between chunks (except for the last one)
+                if (i + CHUNK_SIZE < newText.length) {
+                  await new Promise(resolve => setTimeout(resolve, CHAR_DELAY_MS));
+                }
+              }
+
+              lastReflectionText = currentReflectionText;
+            }
           }
         }
 
@@ -1205,10 +1246,27 @@ Please provide your reflection and a concise summary.
       // Use the last valid text for final parsing
       const finalTextToParse = lastValidText || accumulatedText;
 
+      // Debug logging for final response
+      log.debug('Final streaming response debug', {
+        hasFinalText: !!finalTextToParse,
+        finalTextLength: finalTextToParse?.length || 0,
+        finalTextPreview: finalTextToParse?.substring(0, 200) || 'empty',
+        finalTextSuffix: finalTextToParse?.substring(Math.max(0, (finalTextToParse?.length || 0) - 100)) || 'empty',
+        hasLastValidText: !!lastValidText,
+        lastValidTextLength: lastValidText?.length || 0,
+        hasAccumulatedText: !!accumulatedText,
+        accumulatedTextLength: accumulatedText?.length || 0,
+        hasLastReflectionText: !!lastReflectionText,
+        lastReflectionTextLength: lastReflectionText?.length || 0,
+        lastReflectionTextPreview: lastReflectionText?.substring(0, 200) || 'empty'
+      });
+
       // Final parse of complete response
       try {
         if (finalTextToParse && finalTextToParse.trim()) {
+          log.debug('Attempting to parse final text');
           finalData = JSON.parse(finalTextToParse);
+          log.debug('Successfully parsed final streaming response');
         } else {
           log.warn('No text received from streaming response, using fallback data');
           finalData = {
@@ -1224,7 +1282,8 @@ Please provide your reflection and a concise summary.
           finalTextToParse: finalTextToParse?.substring(0, 500),
           lastValidText: lastValidText?.substring(0, 500),
           accumulatedText: accumulatedText?.substring(0, 500),
-          lastReflectionText: lastReflectionText?.substring(0, 500)
+          lastReflectionText: lastReflectionText?.substring(0, 500),
+          parseErrorMessage: (parseError as Error).message
         }, parseError as Error);
         // Fallback: use the last reflection text we got from streaming
         finalData = {
@@ -1236,9 +1295,11 @@ Please provide your reflection and a concise summary.
         };
       }
 
-      // Send final complete chunk
+      // Send final complete chunk - only send new text if any wasn't streamed yet
+      const finalReflection = finalData.reflection || lastReflectionText || '';
+      const remainingText = finalReflection.substring(lastReflectionText.length);
       await onChunk({
-        text: finalData.reflection || accumulatedText,
+        text: remainingText,
         isComplete: true
       });
 

@@ -149,10 +149,14 @@ const JournalApp: React.FC = () => {
     audioProps.stopCurrentAudio();
 
     try {
+      // Track reflection text locally (not just in state) to avoid async state timing issues
+      let accumulatedReflectionText = '';
+
       // Streaming callback to update UI in real-time
       const streamingCallback: StreamingCallback = (chunk) => {
         console.log('[JournalApp] Received streaming chunk:', chunk);
-        setStreamingReflection(prev => prev + chunk.text);
+        accumulatedReflectionText += chunk.text; // Track locally
+        setStreamingReflection(prev => prev + chunk.text); // Also update UI
 
         if (chunk.isComplete) {
           console.log('[JournalApp] Streaming completed');
@@ -192,7 +196,8 @@ const JournalApp: React.FC = () => {
       console.log(`[JournalApp] Received streaming reflection with topic: "${topic}", mood: "${detectedMood}", entities:`, entities, 'highlights:', highlights);
 
       // Create the final reflection object with the complete streamed text
-      const finalReflectionContent = streamingReflection;
+      // Use the locally tracked text, not the state (which may not be updated yet)
+      const finalReflectionContent = accumulatedReflectionText;
       const newReflection = {
         content: finalReflectionContent,
         summary,
