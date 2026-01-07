@@ -24,6 +24,7 @@ export class AudioStreamPlayer {
   private isPlaying: boolean = false;
   private requestStartTime: number = 0;
   private ownsAudioContext: boolean = false;
+  private stopRequested: boolean = false;
 
   // Mobile detection utilities
   private isMobile(): boolean {
@@ -167,6 +168,7 @@ export class AudioStreamPlayer {
   async playFromResponse(response: Response): Promise<void> {
     this.requestStartTime = Date.now();
     this.isPlaying = true;
+    this.stopRequested = false;
 
     try {
       this.options.onStatusChange('Reading stream...');
@@ -450,6 +452,13 @@ export class AudioStreamPlayer {
           await lastPlaybackPromise; // Wait for last segment to finish before playing remaining audio
         }
 
+        // Check if stop was requested before playing remaining audio
+        if (this.stopRequested) {
+          this.options.onLog('Stop requested, skipping remaining audio playback');
+          this.isPlaying = false;
+          return;
+        }
+
         // Play remaining audio from where segments left off
         const totalSegmentDuration = segmentDurations.reduce((sum, d) => sum + d, 0);
         this.options.onLog(
@@ -480,6 +489,7 @@ export class AudioStreamPlayer {
    */
   stop(): void {
     this.isPlaying = false;
+    this.stopRequested = true;
 
     // Stop all active audio sources (segments + complete audio)
     const sourcesToStop = Array.from(this.activeSources);

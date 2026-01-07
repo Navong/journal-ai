@@ -47,6 +47,16 @@ const decodeBase64 = (base64: string) => {
     return bytes;
 };
 
+const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+};
+
 const isCompressedAudio = (base64Audio: string): boolean => {
     try {
         const sample = base64Audio.substring(0, Math.min(100, base64Audio.length));
@@ -179,14 +189,40 @@ export const AudioManager: React.FC<AudioManagerProps> = ({
             let buffer: AudioBuffer;
             try {
                 const audioBytes = decodeBase64(base64Audio);
-                const mimeType = getAudioMimeType(base64Audio);
-                console.log(`[playAudioChunk] Decoding compressed audio as ${mimeType}`);
-                const audioBlob = new Blob([audioBytes], { type: mimeType });
-                const arrayBuffer = await audioBlob.arrayBuffer();
-                buffer = await ctx.decodeAudioData(arrayBuffer);
-                console.log(`[playAudioChunk] Successfully decoded compressed audio: ${buffer.duration.toFixed(2)}s, ${buffer.sampleRate}Hz`);
-            } catch (decodeError) {
-                console.error('[playAudioChunk] Failed to decode compressed audio:', decodeError);
+
+                // Try to decode as MP3 first (most common TTS format)
+                try {
+                    console.log(`[playAudioChunk] Attempting to decode as MP3...`);
+                    const audioBlob = new Blob([audioBytes], { type: 'audio/mpeg' });
+                    const arrayBuffer = await audioBlob.arrayBuffer();
+                    buffer = await ctx.decodeAudioData(arrayBuffer);
+                    console.log(`[playAudioChunk] Successfully decoded as MP3: ${buffer.duration.toFixed(2)}s, ${buffer.sampleRate}Hz`);
+                } catch (mp3Error) {
+                    // If MP3 fails, try WebM
+                    try {
+                        console.log(`[playAudioChunk] MP3 decode failed, trying WebM...`);
+                        const audioBlob = new Blob([audioBytes], { type: 'audio/webm' });
+                        const arrayBuffer = await audioBlob.arrayBuffer();
+                        buffer = await ctx.decodeAudioData(arrayBuffer);
+                        console.log(`[playAudioChunk] Successfully decoded as WebM: ${buffer.duration.toFixed(2)}s, ${buffer.sampleRate}Hz`);
+                    } catch (webmError) {
+                        // If WebM fails, try WAV
+                        try {
+                            console.log(`[playAudioChunk] WebM decode failed, trying WAV...`);
+                            const audioBlob = new Blob([audioBytes], { type: 'audio/wav' });
+                            const arrayBuffer = await audioBlob.arrayBuffer();
+                            buffer = await ctx.decodeAudioData(arrayBuffer);
+                            console.log(`[playAudioChunk] Successfully decoded as WAV: ${buffer.duration.toFixed(2)}s, ${buffer.sampleRate}Hz`);
+                        } catch (wavError) {
+                            // If all formats fail, try raw PCM
+                            console.log(`[playAudioChunk] All compressed formats failed, trying raw PCM...`);
+                            buffer = await ctx.decodeAudioData(audioBytes.buffer.slice(audioBytes.byteOffset, audioBytes.byteOffset + audioBytes.byteLength));
+                            console.log(`[playAudioChunk] Successfully decoded as raw PCM: ${buffer.duration.toFixed(2)}s, ${buffer.sampleRate}Hz`);
+                        }
+                    }
+                }
+            } catch (finalError) {
+                console.error('[playAudioChunk] Failed to decode audio in any format:', finalError);
                 throw new Error('Failed to decode audio');
             }
 
@@ -375,9 +411,9 @@ export const AudioManager: React.FC<AudioManagerProps> = ({
                     onLog: (msg) => console.log(`[AudioPlayer] ${msg}`),
                     onStatusChange: (status) => console.log(`[AudioPlayer] Status: ${status}`),
                     audioContext: sharedAudioContext,
-                    // Enable progressive playback for reflection, disable for history to ensure clean stopping
-                    maxSegments: isHistoryAudio ? 0 : 10, // 0 disables progressive playback for history
-                    segmentSize: isHistoryAudio ? 0 : 256 * 1024 // 0 disables progressive playback for history
+                    // Use progressive playback for both reflection and history audio for better stopping behavior
+                    maxSegments: 10,
+                    segmentSize: 256 * 1024
                 });
                 audioPlayerRef.current = player;
 
@@ -626,31 +662,41 @@ export const AudioManager: React.FC<AudioManagerProps> = ({
         setIsGeneratingVoice(true);
         try {
             const entryId = id.replace('history-', '');
+            let audioData: string | null = null;
+
+            // Try to get cached audio from S3/database first
             if (entryId && userId && !isDemoMode) {
-                const response = await fetch(`/api/history/audio?entryId=${encodeURIComponent(entryId)}&streaming=true`);
-                if (response.ok && response.body) {
-                    console.log('[AudioManager] Got audio stream (S3 or database), starting playback...');
-                    setIsGeneratingVoice(false);
-                    setGeneratingAudioId(null);
-                    playAudio(response, id);
+                try {
+                    // Use streaming=true to get raw audio data, but we'll wait for complete download
+                    const response = await fetch(`/api/history/audio?entryId=${encodeURIComponent(entryId)}&streaming=true`);
+                    if (response.ok && response.body) {
+                        // Wait for complete audio download
+                        const arrayBuffer = await response.arrayBuffer();
+                        audioData = arrayBufferToBase64(arrayBuffer);
+                        console.log('[AudioManager] Got complete audio from S3/database, starting playback...');
+                    }
+                } catch (fetchError) {
+                    console.log('[AudioManager] Could not fetch cached audio, will generate new:', fetchError);
+                }
+            }
+
+            // If no cached audio, generate new audio
+            if (!audioData) {
+                console.log('[AudioManager] Generating new audio for history playback...');
+                const audioResult = await generateSpeech(text, { chunked: text.length > 1500 });
+                if (audioResult) {
+                    audioData = Array.isArray(audioResult) ? audioResult[0] : audioResult;
+                } else {
+                    showToast('Could not generate audio. Please try again.', 'error');
                     return;
                 }
             }
 
-            const audioStream = await generateSpeechStream(text, entryId);
-            if (audioStream) {
-                setIsGeneratingVoice(false);
-                setGeneratingAudioId(null);
-                playAudio(audioStream, id);
-            } else {
-                const audioResult = await generateSpeech(text, { chunked: text.length > 1500 });
-                if (audioResult) {
-                    const audioData = Array.isArray(audioResult) ? audioResult : [audioResult];
-                    playAudio(audioData, id);
-                } else {
-                    showToast('Could not generate audio. Please try again.', 'error');
-                }
-            }
+            // Play the complete audio data
+            setIsGeneratingVoice(false);
+            setGeneratingAudioId(null);
+            playAudio(audioData, id);
+
         } catch (error) {
             console.error('TTS generation error:', error);
             showToast('Error generating speech. Please try again.', 'error');
