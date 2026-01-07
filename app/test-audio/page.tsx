@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { AudioStreamPlayer, AudioFormat } from '@/app/utils/audioStreamPlayer';
+import { AudioStreamPlayer, AudioFormat } from '@/utils/audioStreamPlayer';
 
 export default function TestAudioPage() {
   const [isPlaying, setIsPlaying] = useState(false);

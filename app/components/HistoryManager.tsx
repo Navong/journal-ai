@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { HistoryEntry } from '../types';
-import { historyService } from '../services/historyService';
+import { historyService } from '../lib/core/history';
 import { showToast } from '../utils/toast';
 
 // Generate user-scoped keys to prevent data leakage between users

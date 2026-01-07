@@ -3,11 +3,11 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { AudioStreamPlayer, AudioFormat } from '../utils/audioStreamPlayer';
 import { generateSpeech, streamToBase64 } from '../utils/audioGeneration';
-import { generateSpeechStream } from '../services/journalAIService';
+import { generateSpeechStream } from '../lib/core/journal';
 import { audioCache } from '../utils/audioCache';
 import { optimizeAudio } from '../utils/audioOptimization';
 import { syncAudioToDatabase, shouldRunSync, getSyncState, AudioSyncProgress } from '../utils/audioSync';
-import { historyService } from '../services/historyService';
+import { historyService } from '../lib/core/history';
 import { showToast } from '../utils/toast';
 import { withRetry } from '../utils/retry';
 
@@ -105,6 +105,17 @@ const getAudioMimeType = (base64Audio: string): string => {
         // Default to webm
     }
     return 'audio/webm';
+};
+
+// Mobile detection utilities
+const isMobile = () => {
+    return /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+};
+
+const isIOS = () => {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 };
 
 export const AudioManager: React.FC<AudioManagerProps> = ({
@@ -328,12 +339,45 @@ export const AudioManager: React.FC<AudioManagerProps> = ({
                             contentType.includes('audio/mpeg') ? 'mp3' : 'wav'
                 );
 
-                console.log(`[AudioManager] Creating AudioStreamPlayer (format: ${audioFormat}, sampleRate: ${sampleRate}Hz)`);
+                // Separate streaming configurations for different use cases
+                // History audio: Use aggressive stopping (closes AudioContext)
+                // Reflection audio: Use progressive streaming (keeps AudioContext open)
+                const isHistoryAudio = id.toString().includes('history');
+
+                const sharedAudioContext = ensureAudioContext();
+                if (!sharedAudioContext) {
+                    console.error('[AudioManager] Unable to obtain AudioContext for streaming playback');
+                    showToast('Audio playback is not supported on this device.', 'error');
+                    setIsPlayingAudio(false);
+                    setActiveAudioId(null);
+                    currentPlaybackIdRef.current = null;
+                    return;
+                }
+
+                if (sharedAudioContext.state === 'suspended') {
+                    try {
+                        await sharedAudioContext.resume();
+                        console.log('[AudioManager] Shared AudioContext resumed for streaming playback');
+                    } catch (resumeError) {
+                        console.error('[AudioManager] Failed to resume shared AudioContext:', resumeError);
+                        showToast('Audio requires user interaction. Please tap play again.', 'error');
+                        setIsPlayingAudio(false);
+                        setActiveAudioId(null);
+                        currentPlaybackIdRef.current = null;
+                        return;
+                    }
+                }
+
+                console.log(`[AudioManager] Creating AudioStreamPlayer (${isHistoryAudio ? 'history' : 'reflection'} mode, format: ${audioFormat}, sampleRate: ${sampleRate}Hz)`);
                 const player = new AudioStreamPlayer({
                     format: audioFormat,
                     sampleRate: sampleRate,
                     onLog: (msg) => console.log(`[AudioPlayer] ${msg}`),
-                    onStatusChange: (status) => console.log(`[AudioPlayer] Status: ${status}`)
+                    onStatusChange: (status) => console.log(`[AudioPlayer] Status: ${status}`),
+                    audioContext: sharedAudioContext,
+                    // Enable progressive playback for reflection, disable for history to ensure clean stopping
+                    maxSegments: isHistoryAudio ? 0 : 10, // 0 disables progressive playback for history
+                    segmentSize: isHistoryAudio ? 0 : 256 * 1024 // 0 disables progressive playback for history
                 });
                 audioPlayerRef.current = player;
 
@@ -355,10 +399,22 @@ export const AudioManager: React.FC<AudioManagerProps> = ({
                     if (audioPlayerRef.current === player) {
                         audioPlayerRef.current = null;
                     }
-                    showToast('Error playing audio', 'error');
                     setIsPlayingAudio(false);
                     setActiveAudioId(null);
                     currentPlaybackIdRef.current = null;
+
+                    // Provide mobile-specific error messages
+                    if (isMobile()) {
+                        if (error.message.includes('suspended') || error.message.includes('NotAllowedError')) {
+                            showToast('Audio requires user interaction. Please tap play again.', 'error');
+                        } else if (error.message.includes('NotSupportedError')) {
+                            showToast('Audio format not supported on this device. Try a different browser.', 'error');
+                        } else {
+                            showToast('Audio playback failed. Please check device settings and try again.', 'error');
+                        }
+                    } else {
+                        showToast('Error playing audio', 'error');
+                    }
                 });
             } catch (error) {
                 console.error('Error initializing streaming audio:', error);
@@ -498,7 +554,16 @@ export const AudioManager: React.FC<AudioManagerProps> = ({
     const handleTogglePlayback = async (text: string, id: string = 'main', entryId?: string) => {
         console.log('[AudioManager] handleTogglePlayback called');
 
-        ensureAudioContext();
+        // CRITICAL: Unlock audio context BEFORE any audio operations on mobile
+        if (isMobile()) {
+            const unlocked = await unlockAudioContext();
+            if (!unlocked) {
+                showToast('Please tap to enable audio playback', 'error');
+                return;
+            }
+        } else {
+            ensureAudioContext();
+        }
 
         if (isPlayingAudio && activeAudioId === id) {
             console.log('[AudioManager] Path: Stop playing audio');
@@ -520,7 +585,7 @@ export const AudioManager: React.FC<AudioManagerProps> = ({
             setGeneratingAudioId(id);
             try {
                 console.log('[AudioManager] Generating streaming audio for reflection...');
-                // Pass entryId for journal entries, use id for other cases
+                // Use MP3 format for better mobile compatibility
                 const audioStream = await generateSpeechStream(text, entryId);
 
                 if (audioStream) {
@@ -630,17 +695,52 @@ export const AudioManager: React.FC<AudioManagerProps> = ({
         }
     };
 
+    // Enhanced AudioContext initialization with mobile handling
     const ensureAudioContext = () => {
         if (!audioContextRef.current) {
             try {
-                audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-                console.log('[AudioManager] AudioContext created on user interaction');
+                // Use optimal settings for mobile
+                const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+                audioContextRef.current = new AudioContextClass({
+                    sampleRate: isIOS() ? 44100 : 48000, // iOS prefers 44100
+                    latencyHint: isMobile() ? 'playback' : 'interactive'
+                });
+                console.log('[AudioManager] AudioContext created for mobile device');
             } catch (error) {
                 console.error('[AudioManager] Failed to create AudioContext:', error);
                 showToast('Audio not supported on this device', 'error');
             }
         }
         return audioContextRef.current;
+    };
+
+    // Add mobile-specific audio unlock function
+    const unlockAudioContext = async (): Promise<boolean> => {
+        const ctx = ensureAudioContext();
+        if (!ctx) return false;
+
+        if (ctx.state === 'suspended') {
+            try {
+                await ctx.resume();
+                console.log('[AudioManager] AudioContext resumed successfully');
+
+                // Create and immediately discard a short audio buffer to "unlock" on iOS
+                if (isIOS()) {
+                    const buffer = ctx.createBuffer(1, 1, 22050);
+                    const source = ctx.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(ctx.destination);
+                    source.start();
+                    console.log('[AudioManager] iOS audio unlock attempted');
+                }
+
+                return true;
+            } catch (error) {
+                console.error('[AudioManager] Failed to resume AudioContext:', error);
+                return false;
+            }
+        }
+        return true;
     };
 
     // Audio sync effect

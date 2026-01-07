@@ -81,6 +81,39 @@ export const JournalInterface: React.FC<JournalInterfaceProps> = (props) => {
         }
     }, [props.entry]);
 
+    // Add audio unlock on first user interaction for mobile
+    useEffect(() => {
+        const handleFirstInteraction = async () => {
+            // Try to unlock audio context on first user interaction
+            if (typeof window !== 'undefined' && 'AudioContext' in window) {
+                try {
+                    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+                    const ctx = new AudioContextClass();
+                    if (ctx.state === 'suspended') {
+                        await ctx.resume();
+                    }
+                    await ctx.close(); // Clean up test context
+                    console.log('[JournalInterface] Audio context unlocked on user interaction');
+                } catch (error) {
+                    console.warn('[JournalInterface] Could not unlock audio context:', error);
+                }
+            }
+
+            // Remove listeners after first interaction
+            document.removeEventListener('touchstart', handleFirstInteraction);
+            document.removeEventListener('click', handleFirstInteraction);
+        };
+
+        // Add listeners for first user interaction
+        document.addEventListener('touchstart', handleFirstInteraction, { once: true });
+        document.addEventListener('click', handleFirstInteraction, { once: true });
+
+        return () => {
+            document.removeEventListener('touchstart', handleFirstInteraction);
+            document.removeEventListener('click', handleFirstInteraction);
+        };
+    }, []);
+
     const isButtonDisabled = !props.entry.trim() || props.status === AppStatus.LOADING;
 
     return (
@@ -158,11 +191,11 @@ export const JournalInterface: React.FC<JournalInterfaceProps> = (props) => {
                         </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5 md:gap-3">
+                    <div className="flex items-center gap-1 md:gap-2">
                         {/* History/Journal Toggle - Compact on mobile */}
                         <button
                             onClick={() => props.onViewModeChange(props.viewMode === ViewMode.JOURNAL ? ViewMode.HISTORY : ViewMode.JOURNAL)}
-                            className={`flex items-center justify-center md:gap-2 text-xs md:text-sm font-medium transition-all px-2.5 md:px-4 py-2.5 rounded-full md:rounded-lg touch-manipulation min-w-[44px] min-h-[44px] md:min-h-0 shadow-sm active:scale-95 ${
+                            className={`flex items-center justify-center md:gap-1.5 text-xs md:text-sm font-medium transition-all px-2 md:px-3 py-2 rounded-full md:rounded-lg touch-manipulation min-w-[36px] min-h-[36px] md:min-h-0 shadow-sm active:scale-95 ${
                                 props.viewMode === ViewMode.HISTORY
                                     ? 'bg-emerald-600 text-white hover:bg-emerald-700'
                                     : 'bg-white text-stone-700 hover:bg-stone-50 border border-stone-200 hover:border-stone-300'
@@ -171,14 +204,14 @@ export const JournalInterface: React.FC<JournalInterfaceProps> = (props) => {
                         >
                             {props.viewMode === ViewMode.JOURNAL ? (
                                 <>
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 md:h-4 md:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 md:h-3.5 md:w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
                                     <span className="hidden md:inline">History</span>
                                 </>
                             ) : (
                                 <>
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 md:h-4 md:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 md:h-3.5 md:w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                     </svg>
                                     <span className="hidden md:inline">Journal</span>
@@ -187,28 +220,28 @@ export const JournalInterface: React.FC<JournalInterfaceProps> = (props) => {
                         </button>
 
                         {(props.session?.user || props.isDemoMode) && (
-                            <div className="flex items-center gap-1.5 md:gap-2">
+                            <div className="flex items-center gap-1 md:gap-1.5">
                                 {/* User Avatar - Compact on mobile, full badge on desktop */}
                                 {props.session?.user && (
                                     <>
                                         {/* Mobile: Avatar only */}
                                         <button
-                                            className="md:hidden flex items-center justify-center min-w-[44px] min-h-[44px] bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-full shadow-md active:scale-95 transition-transform border-2 border-white"
+                                            className="md:hidden flex items-center justify-center min-w-[36px] min-h-[36px] bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-full shadow-md active:scale-95 transition-transform border-2 border-white"
                                             title={props.session.user.email?.split('@')[0]}
                                         >
-                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" viewBox="0 0 20 20" fill="currentColor">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" viewBox="0 0 20 20" fill="currentColor">
                                                 <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
                                             </svg>
                                         </button>
 
                                         {/* Desktop: Full badge */}
-                                        <div className="hidden md:flex items-center gap-2 bg-gradient-to-r from-emerald-50 to-blue-50 px-3 py-2 rounded-lg border border-emerald-100 shadow-sm">
-                                            <div className="flex items-center justify-center w-7 h-7 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-full">
-                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" viewBox="0 0 20 20" fill="currentColor">
+                                        <div className="hidden md:flex items-center gap-1.5 bg-gradient-to-r from-emerald-50 to-blue-50 px-2.5 py-1.5 rounded-lg border border-emerald-100 shadow-sm">
+                                            <div className="flex items-center justify-center w-6 h-6 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-full">
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
                                                     <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
                                                 </svg>
                                             </div>
-                                            <span className="text-stone-700 text-sm font-medium">
+                                            <span className="text-stone-700 text-xs font-medium">
                                                 {props.session.user.email?.split('@')[0]}
                                             </span>
                                         </div>
@@ -219,10 +252,10 @@ export const JournalInterface: React.FC<JournalInterfaceProps> = (props) => {
                                 {props.session?.user ? (
                                     <button
                                         onClick={() => signOut({ callbackUrl: '/login' })}
-                                        className="flex items-center justify-center md:gap-2 bg-white hover:bg-rose-50 active:bg-rose-100 text-stone-600 hover:text-rose-600 text-xs md:text-sm font-medium transition-all px-2.5 md:px-4 py-2.5 rounded-full md:rounded-lg border border-stone-200 hover:border-rose-200 touch-manipulation min-w-[44px] min-h-[44px] md:min-h-0 shadow-sm active:scale-95"
+                                        className="flex items-center justify-center md:gap-1.5 bg-white hover:bg-rose-50 active:bg-rose-100 text-stone-600 hover:text-rose-600 text-xs md:text-sm font-medium transition-all px-2 md:px-3 py-2 rounded-full md:rounded-lg border border-stone-200 hover:border-rose-200 touch-manipulation min-w-[36px] min-h-[36px] md:min-h-0 shadow-sm active:scale-95"
                                         title="Sign out"
                                     >
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 md:h-4 md:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 md:h-3.5 md:w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                                         </svg>
                                         <span className="hidden md:inline">Sign out</span>
@@ -230,10 +263,10 @@ export const JournalInterface: React.FC<JournalInterfaceProps> = (props) => {
                                 ) : props.isDemoMode && (
                                     <button
                                         onClick={() => window.location.href = '/login'}
-                                        className="flex items-center gap-1.5 md:gap-2 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 active:from-emerald-800 active:to-emerald-900 text-white text-xs md:text-sm font-semibold transition-all px-3 md:px-4 py-2.5 rounded-full md:rounded-lg shadow-md hover:shadow-lg touch-manipulation min-h-[44px] md:min-h-0 active:scale-95"
+                                        className="flex items-center gap-1 md:gap-1.5 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 active:from-emerald-800 active:to-emerald-900 text-white text-xs md:text-sm font-semibold transition-all px-2.5 md:px-3 py-2 rounded-full md:rounded-lg shadow-md hover:shadow-lg touch-manipulation min-h-[36px] md:min-h-0 active:scale-95"
                                         title="Sign in to save your entries"
                                     >
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
                                         </svg>
                                         <span>Sign in</span>
@@ -262,7 +295,7 @@ export const JournalInterface: React.FC<JournalInterfaceProps> = (props) => {
                                     }
                                 }}
                                 placeholder="How are you feeling right now?"
-                                className="w-full min-h-[120px] md:min-h-[200px] bg-transparent text-base md:text-2xl font-light text-stone-800 placeholder-stone-300 border-none outline-none focus:ring-0 focus:outline-none resize-none p-0 leading-[1.6] mb-3 md:mb-4 transition-all duration-300 overflow-hidden"
+                                className="w-full min-h-[80px] md:min-h-[200px] bg-transparent text-base md:text-2xl font-light text-stone-800 placeholder-stone-300 border-none outline-none focus:ring-0 focus:outline-none resize-none p-0 leading-[1.6] mb-2 md:mb-3 transition-all duration-300 overflow-hidden"
                                 disabled={props.status === AppStatus.LOADING}
                                 autoFocus
                             />

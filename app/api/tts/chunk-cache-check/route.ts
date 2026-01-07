@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/app/auth';
-import { checkObjectExists } from '@/app/utils/s3Service';
+import { auth } from '@/auth';
+import { checkObjectExists } from '@/utils/s3Service';
 
 /**
  * POST /api/tts/chunk-cache-check

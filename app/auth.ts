@@ -9,7 +9,7 @@ let hashEmailForUserId: ((email: string) => string) | null = null;
 function getHashFunction() {
   if (!hashEmailForUserId) {
     // Only import in Node.js runtime (JWT callbacks run in Node.js)
-    const encryption = require("@/app/utils/encryption");
+    const encryption = require("@/utils/encryption");
     hashEmailForUserId = encryption.hashEmailForUserId;
   }
   return hashEmailForUserId;
@@ -73,12 +73,12 @@ export const authConfig = {
         // This ensures users can access their data after logout/login
         // Note: JWT callbacks run in Node.js runtime, so we can use Node.js crypto
         const hashFn = getHashFunction();
-        
+
         if (!hashFn) {
           console.error('[NextAuth] Failed to load hash function');
           return token;
         }
-        
+
         if (user.email) {
           const hashedId = hashFn(user.email);
           token.id = hashedId;
@@ -95,10 +95,10 @@ export const authConfig = {
           token.id = hashedId;
           console.log(`[NextAuth] User ID set: ${hashedId.substring(0, 20)}... (from user.id)`);
         } else {
-          console.error('[NextAuth] No user identifier found!', { 
-            hasEmail: !!user.email, 
+          console.error('[NextAuth] No user identifier found!', {
+            hasEmail: !!user.email,
             hasProviderAccountId: !!account?.providerAccountId,
-            hasUserId: !!user.id 
+            hasUserId: !!user.id
           });
         }
       }

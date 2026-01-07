@@ -1,6 +1,6 @@
 // app/utils/audioGeneration.ts
 import { audioCache } from './audioCache';
-import { generateSpeechStream as fetchSpeechStream } from '../services/journalAIService';
+import { generateSpeechStream as fetchSpeechStream } from '../lib/core/journal';
 import logger from './logger';
 
 const log = logger.module('AudioGeneration');

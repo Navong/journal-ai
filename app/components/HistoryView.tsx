@@ -4,9 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { HistoryEntry } from '../types';
 import ReactMarkdown from 'react-markdown';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
-import { EntityTags } from './EntityTags';
 import { HighlightedText } from './HighlightedText';
-import { historyService } from '../services/historyService';
+import { historyService } from '../lib/core/history';
 
 interface HistoryViewProps {
   history: HistoryEntry[];
@@ -256,21 +255,16 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 {/* Essence Summary */}
                 {item.summary && (
                   <div className="mb-3 md:mb-4">
-                    <p className="text-emerald-800 font-semibold text-sm md:text-base leading-relaxed border-b border-emerald-200/60 pb-2.5">
+                    <p className="text-emerald-800 font-semibold text-base md:text-base leading-relaxed border-b border-emerald-200/60 pb-2.5">
                       {item.summary}
                     </p>
                   </div>
                 )}
 
-                {/* Entity Tags */}
-                {item.entities && (
-                  <EntityTags entities={item.entities} compact />
-                )}
-
                 {/* Journal Entry with Truncation */}
                 <div className="mb-5 md:mb-6">
                   <div className={`
-                    relative text-stone-800 font-serif leading-relaxed whitespace-pre-wrap text-sm md:text-base transition-all duration-300
+                    relative text-stone-800 font-serif leading-relaxed whitespace-pre-wrap text-base md:text-base transition-all duration-300
                     ${!isExpanded && isLongEntry ? 'max-h-[100px] md:max-h-[120px] overflow-hidden' : ''}
                   `}>
                     {item.text}
@@ -294,7 +288,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 </div>
 
                 {/* Reflection Card */}
-                <div className="bg-[#F2F6F3] p-4 md:p-6 rounded-xl md:rounded-2xl border border-emerald-100/50 text-stone-800 font-serif text-sm md:text-base leading-relaxed mb-3 md:mb-4 shadow-sm">
+                <div className="bg-[#F2F6F3] p-4 md:p-6 rounded-xl md:rounded-2xl border border-emerald-100/50 text-stone-800 font-serif text-base md:text-base leading-relaxed mb-3 md:mb-4 shadow-sm">
                   <div className={`
                     relative transition-all duration-300
                     ${!isExpanded && isLongReflection ? 'max-h-[200px] md:max-h-[240px] overflow-hidden' : ''}

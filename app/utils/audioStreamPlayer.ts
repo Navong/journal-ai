@@ -11,25 +11,49 @@ export interface AudioStreamPlayerOptions {
   onStatusChange?: (status: string) => void;
   segmentSize?: number; // Size in bytes for progressive playback segments (default: 512KB for faster playback)
   maxSegments?: number; // Maximum number of segments for progressive playback (default: 10)
+  audioContext?: AudioContext; // Optional shared AudioContext (pre-unlocked on mobile)
 }
+
+type InternalAudioStreamPlayerOptions = Required<Omit<AudioStreamPlayerOptions, 'audioContext'>> & Pick<AudioStreamPlayerOptions, 'audioContext'>;
 
 export class AudioStreamPlayer {
   private audioContext: AudioContext | null = null;
   private currentSource: AudioBufferSourceNode | null = null;
-  private options: Required<AudioStreamPlayerOptions>;
+  private activeSources: Set<AudioBufferSourceNode> = new Set();
+  private options: InternalAudioStreamPlayerOptions;
   private isPlaying: boolean = false;
   private requestStartTime: number = 0;
+  private ownsAudioContext: boolean = false;
+
+  // Mobile detection utilities
+  private isMobile(): boolean {
+    return /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }
+
+  private isIOS(): boolean {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }
 
   constructor(options: AudioStreamPlayerOptions) {
     this.options = {
       format: options.format,
       sampleRate: options.sampleRate || 44100,
-      onLog: options.onLog || (() => {}),
-      onProgress: options.onProgress || (() => {}),
-      onStatusChange: options.onStatusChange || (() => {}),
+      onLog: options.onLog || (() => { }),
+      onProgress: options.onProgress || (() => { }),
+      onStatusChange: options.onStatusChange || (() => { }),
       segmentSize: options.segmentSize || 256 * 1024, // 512KB default for faster playback
       maxSegments: options.maxSegments || 10,
+      audioContext: options.audioContext,
     };
+
+    if (options.audioContext) {
+      this.audioContext = options.audioContext;
+      this.ownsAudioContext = false;
+    } else {
+      this.ownsAudioContext = true;
+    }
   }
 
   /**
@@ -116,18 +140,25 @@ export class AudioStreamPlayer {
   }
 
   /**
-   * Initialize AudioContext
+   * Initialize AudioContext with mobile optimization
    */
   private async initAudioContext(): Promise<void> {
     if (!this.audioContext) {
-      this.audioContext = new AudioContext({ sampleRate: this.options.sampleRate });
-      if (this.audioContext.state === 'suspended') {
-        await this.audioContext.resume();
-      }
-      this.options.onLog(
-        `AudioContext created (state: ${this.audioContext.state}, sampleRate: ${this.audioContext.sampleRate}Hz)`
-      );
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      this.audioContext = new AudioContextClass({
+        sampleRate: this.isIOS() ? 44100 : this.options.sampleRate,
+        latencyHint: this.isMobile() ? 'playback' : 'interactive'
+      });
+      this.ownsAudioContext = true;
     }
+
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+
+    this.options.onLog(
+      `AudioContext ${this.ownsAudioContext ? 'ready' : 'shared'} for ${this.isMobile() ? 'mobile' : 'desktop'} (state: ${this.audioContext.state}, sampleRate: ${this.audioContext.sampleRate}Hz)`
+    );
   }
 
   /**
@@ -192,9 +223,11 @@ export class AudioStreamPlayer {
             );
           }
 
-          // Progressive playback: Play segments as they're buffered
+          // Progressive playback: Play segments as they're buffered (when maxSegments > 0)
           const currentSegmentThreshold = (segmentIndex + 1) * this.options.segmentSize;
-          if (segmentIndex < this.options.maxSegments && totalBytes >= currentSegmentThreshold) {
+          const shouldDoProgressivePlayback = this.options.maxSegments > 0 && segmentIndex < this.options.maxSegments && totalBytes >= currentSegmentThreshold;
+
+          if (shouldDoProgressivePlayback) {
             const segmentNum = segmentIndex + 1;
             segmentIndex++;
 
@@ -287,14 +320,16 @@ export class AudioStreamPlayer {
                     source.buffer = audioBuffer;
                     source.connect(this.audioContext!.destination);
 
+                    // Track this source for stopping
+                    this.activeSources.add(source);
+
                     if (segmentNum === 1) {
                       const playTime = Date.now() - this.requestStartTime;
                       this.options.onLog(`🎵 Segment ${segmentNum} PLAYBACK STARTED in ${playTime}ms`);
                       this.options.onStatusChange(`Playing segment ${segmentNum}...`);
                     } else {
                       this.options.onLog(
-                        `🎵 Segment ${segmentNum} PLAYBACK STARTED (chained after segment ${
-                          segmentNum - 1
+                        `🎵 Segment ${segmentNum} PLAYBACK STARTED (chained after segment ${segmentNum - 1
                         })`
                       );
                       this.options.onStatusChange(`Playing segment ${segmentNum}...`);
@@ -304,6 +339,8 @@ export class AudioStreamPlayer {
                       this.options.onLog(
                         `✅ Segment ${segmentNum} ended (${audioBuffer.duration.toFixed(2)}s)`
                       );
+                      // Remove from active sources when ended
+                      this.activeSources.delete(source);
                       resolve();
                     };
 
@@ -357,7 +394,28 @@ export class AudioStreamPlayer {
         completeAudioBuffer = this.pcmToAudioBuffer(pcmData, 1);
       } else {
         // MP3 format - use decodeAudioData
-        completeAudioBuffer = await this.audioContext!.decodeAudioData(completeBuffer.buffer.slice(0));
+        try {
+          this.options.onLog(`🔊 Attempting to decode MP3 data (${completeBuffer.length} bytes)`);
+          completeAudioBuffer = await this.audioContext!.decodeAudioData(completeBuffer.buffer.slice(0));
+          this.options.onLog(`✅ MP3 decoded successfully: ${completeAudioBuffer.duration.toFixed(2)}s`);
+        } catch (mp3Error: any) {
+          this.options.onLog(`❌ MP3 decode failed: ${mp3Error.message}`);
+
+          // Check if the data looks like valid MP3
+          const firstBytes = completeBuffer.slice(0, 10);
+          const hexBytes = Array.from(firstBytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+          this.options.onLog(`📊 First 10 bytes of MP3 data: ${hexBytes}`);
+
+          // If MP3 decode fails, try falling back to PCM/WAV interpretation
+          this.options.onLog(`🔄 Attempting fallback: treating as PCM data`);
+          try {
+            completeAudioBuffer = this.pcmToAudioBuffer(completeBuffer, 1);
+            this.options.onLog(`✅ Fallback PCM decode successful: ${completeAudioBuffer.duration.toFixed(2)}s`);
+          } catch (pcmError: any) {
+            this.options.onLog(`❌ Fallback PCM decode also failed: ${pcmError.message}`);
+            throw new Error(`Audio decode failed for both MP3 and PCM fallback: MP3 error: ${mp3Error.message}, PCM error: ${pcmError.message}`);
+          }
+        }
       }
 
       const decodeTime = Date.now() - decodeStart;
@@ -372,10 +430,15 @@ export class AudioStreamPlayer {
       source.buffer = completeAudioBuffer;
       source.connect(this.audioContext!.destination);
 
+      // Track this source for stopping
+      this.activeSources.add(source);
+
       source.onended = () => {
         const totalTime = Date.now() - this.requestStartTime;
         this.options.onLog(`🏁 Playback ended. Total time: ${totalTime}ms`);
         this.options.onStatusChange('Playback complete');
+        // Remove from active sources when ended
+        this.activeSources.delete(source);
         this.isPlaying = false;
       };
 
@@ -402,6 +465,7 @@ export class AudioStreamPlayer {
         source.start(0);
       }
 
+      // Set current source for stopping
       this.currentSource = source;
     } catch (error: any) {
       this.options.onLog(`❌ ERROR: ${error.message}`);
@@ -415,18 +479,53 @@ export class AudioStreamPlayer {
    * Stop playback
    */
   stop(): void {
+    this.isPlaying = false;
+
+    // Stop all active audio sources (segments + complete audio)
+    const sourcesToStop = Array.from(this.activeSources);
+    this.activeSources.clear();
+
+    for (const source of sourcesToStop) {
+      try {
+        // Check if source is still connected and playable
+        if (source.context && source.context.state !== 'closed') {
+          source.stop();
+          source.disconnect();
+        }
+      } catch (e) {
+        // Source might already be stopped, ended, or invalid
+        this.options.onLog(`Warning: Could not stop audio source: ${e}`);
+      }
+    }
+
+    // Also stop the legacy currentSource for backward compatibility
     if (this.currentSource) {
       try {
-        this.currentSource.stop();
-        this.currentSource.disconnect();
-        this.options.onLog('Audio stopped by user');
+        if (this.currentSource.context && this.currentSource.context.state !== 'closed') {
+          this.currentSource.stop();
+          this.currentSource.disconnect();
+        }
       } catch (e) {
         // Already stopped
       }
       this.currentSource = null;
     }
-    this.isPlaying = false;
+
+    // Force stop all audio by closing and recreating the AudioContext
+    // This is more aggressive but ensures all audio is stopped
+    if (this.audioContext && this.ownsAudioContext) {
+      try {
+        if (this.audioContext.state !== 'closed') {
+          this.audioContext.close();
+        }
+      } catch (e) {
+        // Context might already be closed
+      }
+      this.audioContext = null;
+    }
+
     this.options.onStatusChange('Stopped');
+    this.options.onLog('Audio stopped by user');
   }
 
   /**
@@ -441,7 +540,7 @@ export class AudioStreamPlayer {
    */
   async dispose(): Promise<void> {
     this.stop();
-    if (this.audioContext) {
+    if (this.audioContext && this.ownsAudioContext) {
       await this.audioContext.close();
       this.audioContext = null;
     }

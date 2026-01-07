@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/app/auth';
-import { getTTSProvider } from '@/app/services/providers/tts';
-import { uploadAudio, isS3Configured } from '@/app/utils/s3Service';
-import { generateChunkHashSync, generateChunkS3Key, normalizeChunk } from '@/app/utils/chunkCaching';
+import { auth } from '@/auth';
+import { getTTSProvider } from '@/lib/tts';
+import { uploadAudio, isS3Configured } from '@/utils/s3Service';
+import { generateChunkHashSync, generateChunkS3Key, normalizeChunk } from '@/utils/chunkCaching';
 
 /**
  * POST /api/tts/chunk-generate
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
 
     // Normalize the chunk
     const normalized = normalizeChunk(chunkText);
-    
+
     // Generate hash and S3 key
     const hash = generateChunkHashSync(normalized);
     const s3Key = generateChunkS3Key(hash);

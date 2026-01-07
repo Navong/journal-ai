@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/app/auth';
-import { downloadAudio, isS3Configured } from '@/app/utils/s3Service';
+import { auth } from '@/auth';
+import { downloadAudio, isS3Configured } from '@/utils/s3Service';
 
 /**
  * POST /api/tts/chunk-download
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('[Chunk Download] Error:', error);
-    
+
     // Check if it's a 404 (chunk doesn't exist)
     if (error?.$metadata?.httpStatusCode === 404 || error?.message?.includes('404')) {
       return NextResponse.json(

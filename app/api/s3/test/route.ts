@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/app/auth';
-import { isS3Configured } from '@/app/utils/s3Service';
+import { auth } from '@/auth';
+import { isS3Configured } from '@/utils/s3Service';
 import { S3Client, HeadBucketCommand } from '@aws-sdk/client-s3';
 
 const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME;

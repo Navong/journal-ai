@@ -2,12 +2,12 @@
 
 import React, { useState, useRef, useCallback } from 'react';
 import { ChatMessage } from '../types';
-import { startJournalChat } from '../services/journalAIService';
+import { startJournalChat } from '../lib/core/journal';
 import { generateSpeech } from '../utils/audioGeneration';
 import { audioCache } from '../utils/audioCache';
 import { showToast } from '../utils/toast';
 import { withRetry } from '../utils/retry';
-import { ChatSession } from '../services/providers/llm/interface';
+import { ChatSession } from '../lib/llm/interface';
 
 interface ChatManagerProps {
     entry: string;

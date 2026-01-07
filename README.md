@@ -19,34 +19,41 @@ Built with Next.js 16 App Router.
 
 2. Create a `.env.local` file in the root directory and add your environment variables:
    ```bash
-   # Required: Gemini API key for AI reflections
-   NEXT_PUBLIC_GEMINI_API_KEY=your_api_key_here
-   
+   # Required: AI Provider (Choose one or both)
+   ## Primary - Google Gemini (requires Google Cloud Console setup)
+   NEXT_PUBLIC_GEMINI_API_KEY=your_gemini_api_key_here
+
+   ## Alternative - xAI Grok via OpenRouter (requires OpenRouter account)
+   OPENROUTER_API_KEY=your_openrouter_api_key_here
+
    # Required: NextAuth secret (generate with: openssl rand -base64 32)
    AUTH_SECRET=your_auth_secret_here
-   
+
    # Required: Database connection (Prisma + Supabase)
    # Get connection strings from: https://supabase.com/dashboard/project/_/settings/database
-   
+
    # Pooled connection for Prisma Client (runtime) - Use Transaction Pooler
    # Format: postgresql://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres?pgbouncer=true
    DATABASE_URL=postgresql://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres?pgbouncer=true
-   
+
    # Direct connection for Prisma CLI (migrations, introspection) - Use Direct Database Connection
    # Format: postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
    DIRECT_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
-   
+
    # Optional: Supabase URL (for future use)
    NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-   
+
    # Required: Google OAuth (for Google sign-in)
    # Get credentials from: https://console.cloud.google.com/apis/credentials
    GOOGLE_CLIENT_ID=your_google_client_id
    GOOGLE_CLIENT_SECRET=your_google_client_secret
    ```
-   
-   > **Note:** 
+
+   > **Note:**
    > - The `NEXT_PUBLIC_` prefix is required for client-side environment variables in Next.js.
+   > - **AI Provider:** You can configure one or both providers. Gemini is the default. Use the test-stream page to switch between providers.
+   > - **Gemini Setup:** Requires Google Cloud Console with AI Studio API enabled.
+   > - **Grok/OpenRouter Setup:** Requires OpenRouter account with credits for xAI models.
    > - `AUTH_SECRET` is required for NextAuth.js to work. Generate one with: `openssl rand -base64 32`
    > - `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are required for Google authentication.
    > - `DATABASE_URL` is required for Prisma to connect to Supabase. Without it, the app will fallback to localStorage (demo mode only).
@@ -171,6 +178,27 @@ The app requires authentication or demo mode to access. Unauthenticated users ar
    GOOGLE_CLIENT_SECRET=your_google_client_secret
    ```
 
+## AI Providers
+
+Serenity Journal supports multiple AI providers for reflections and analysis:
+
+### Google Gemini (Default)
+- **Provider:** Google AI Studio API
+- **Features:** Advanced context caching, optimized for mental wellness
+- **Environment:** `NEXT_PUBLIC_GEMINI_API_KEY`
+- **Setup:** Google Cloud Console → AI Studio API
+
+### xAI Grok via OpenRouter
+- **Provider:** xAI Grok 4.1 Fast via OpenRouter
+- **Features:** Alternative AI perspective with real-time streaming
+- **Environment:** `OPENROUTER_API_KEY`
+- **Setup:** OpenRouter account → API keys
+
+### Provider Selection
+- **Default:** Gemini (production-ready with optimizations)
+- **Testing:** Use `/test-stream` page to switch between providers
+- **Future:** User preference setting to choose provider
+
 ## Project Structure
 
 - `app/` - Next.js App Router directory
@@ -182,18 +210,29 @@ The app requires authentication or demo mode to access. Unauthenticated users ar
   - `login/` - Login page
     - `page.tsx` - Authentication page
   - `api/auth/[...nextauth]/` - NextAuth API routes
+  - `test-stream/page.tsx` - LLM provider testing interface
 - `components/` - React components
   - `JournalApp.tsx` - Main application component
   - `ChatInterface.tsx` - Chat interface component
   - `HistoryView.tsx` - History view component
   - `ReflectionCard.tsx` - Reflection card component
-- `services/` - Service layer
-  - `geminiService.ts` - Gemini AI service integration
-  - `historyService.ts` - Database operations via API routes
+- `lib/` - Application library
+  - `core/` - Core business logic
+    - `journal.ts` - Journal operations and LLM provider management
+    - `entity.ts` - Entity processing utilities
+  - `llm/` - Large Language Model integration
+    - `index.ts` - Provider selection and management
+    - `interface.ts` - LLM provider interface definitions
+    - `providers/` - AI provider implementations
+      - `gemini.ts` - Google Gemini API integration
+      - `grok.ts` - xAI Grok via OpenRouter integration
+    - `services/` - LLM support services
+    - `utils/` - LLM utilities (token counting, context processing)
 - `utils/` - Utility functions
   - `prisma.ts` - Prisma Client instance (server-side)
   - `audioCache.ts` - IndexedDB audio cache management
   - `toast.tsx` - Toast notification system
+  - `entityExtraction.ts` - Named entity recognition
 - `prisma/` - Prisma configuration
   - `schema.prisma` - Database schema definition
 - `api/` - API routes

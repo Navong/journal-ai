@@ -91,6 +91,7 @@ export interface TokenUsage {
   promptTokens: number;      // Input tokens (including cached)
   cachedTokens?: number;     // Tokens served from cache (cost savings)
   completionTokens: number; // Output tokens
+  reasoningTokens?: number;  // Reasoning tokens (for models like Grok)
   totalTokens: number;       // Total tokens (prompt + completion)
 }
 

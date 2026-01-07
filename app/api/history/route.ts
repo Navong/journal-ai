@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/app/auth';
-import { prisma } from '@/app/utils/prisma';
-import logger from '@/app/utils/logger';
-import { normalizeUserId } from '@/app/utils/userIdMigration';
-import { deleteAudio, isS3Configured } from '@/app/utils/s3Service';
+import { auth } from '@/auth';
+import { prisma } from '@/utils/prisma';
+import logger from '@/utils/logger';
+import { normalizeUserId } from '@/utils/userIdMigration';
+import { deleteAudio, isS3Configured } from '@/utils/s3Service';
 
 const log = logger;
 
@@ -20,12 +20,12 @@ export async function GET(request: NextRequest) {
 
   // Extract userId from NextAuth session (already hashed)
   let userId = session.user.id;
-  
+
   // Check if user has email in session and migrate old format data if needed
   // This handles users who had data stored with plain email IDs before the hash update
   if (session.user.email && userId.startsWith('usr_')) {
     try {
-      const { migrateUserDataByEmail } = await import('@/app/utils/userIdMigration');
+      const { migrateUserDataByEmail } = await import('@/utils/userIdMigration');
       const migrationResult = await migrateUserDataByEmail(session.user.email, userId);
       if (migrationResult.entriesMigrated > 0 || migrationResult.preferencesMigrated) {
         log.info(`[Migration] Migrated data for ${session.user.email.substring(0, 5)}***: ${migrationResult.entriesMigrated} entries, preferences: ${migrationResult.preferencesMigrated}`);
@@ -86,14 +86,14 @@ export async function GET(request: NextRequest) {
     log.error(`Failed to fetch history for user ${userId}`, { userId }, error);
     // Check if it's a timeout error
     const errorMessage = error?.message || 'Unknown error';
-    const isTimeout = errorMessage.includes('timeout') || 
-                      errorMessage.includes('Connection terminated') ||
-                      error?.code === 'ETIMEDOUT' ||
-                      error?.code === 'ECONNRESET';
-    
-    return NextResponse.json({ 
-      error: 'Failed to fetch history', 
-      message: isTimeout ? 'Connection terminated due to connection timeout' : errorMessage 
+    const isTimeout = errorMessage.includes('timeout') ||
+      errorMessage.includes('Connection terminated') ||
+      error?.code === 'ETIMEDOUT' ||
+      error?.code === 'ECONNRESET';
+
+    return NextResponse.json({
+      error: 'Failed to fetch history',
+      message: isTimeout ? 'Connection terminated due to connection timeout' : errorMessage
     }, { status: 500 });
   }
 }
@@ -198,7 +198,7 @@ export async function POST(request: NextRequest) {
       if (settled.status === 'fulfilled') {
         const result = settled.value;
         if (result.success) {
-        savedCount++;
+          savedCount++;
           log.debug(`Upserted entry ${result.entryId} for user ${userId}`);
         } else {
           skippedCount++;
@@ -234,10 +234,10 @@ export async function POST(request: NextRequest) {
     log.error('Failed to save entries', { userId }, error);
     // Check if it's a timeout error
     const errorMessage = error?.message || 'Unknown error';
-    const isTimeout = errorMessage.includes('timeout') || 
-                      errorMessage.includes('Connection terminated') ||
-                      error?.code === 'ETIMEDOUT' ||
-                      error?.code === 'ECONNRESET';
+    const isTimeout = errorMessage.includes('timeout') ||
+      errorMessage.includes('Connection terminated') ||
+      error?.code === 'ETIMEDOUT' ||
+      error?.code === 'ECONNRESET';
 
     // Ensure we return a properly serializable error response
     const errorCode = error?.code || 'UNKNOWN_ERROR';
@@ -264,11 +264,11 @@ export async function DELETE(request: NextRequest) {
 
   // Extract userId from NextAuth session (already hashed)
   let userId = session.user.id;
-  
+
   // Check if user has email in session and migrate old format data if needed
   if (session.user.email && userId.startsWith('usr_')) {
     try {
-      const { migrateUserDataByEmail } = await import('@/app/utils/userIdMigration');
+      const { migrateUserDataByEmail } = await import('@/utils/userIdMigration');
       const migrationResult = await migrateUserDataByEmail(session.user.email, userId);
       if (migrationResult.entriesMigrated > 0 || migrationResult.preferencesMigrated) {
         log.info(`[Migration] Migrated data for ${session.user.email.substring(0, 5)}***: ${migrationResult.entriesMigrated} entries, preferences: ${migrationResult.preferencesMigrated}`);

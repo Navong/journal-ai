@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/app/auth';
-import { getTTSProvider } from '@/app/services/providers/tts';
-import { uploadAudio, isS3Configured, checkObjectExists, downloadAudio } from '@/app/utils/s3Service';
-import { hashTTSInput } from '@/app/utils/textHash';
-import { prisma } from '@/app/utils/prisma';
-import { moodToFishEmotion, injectFishEmotion } from '@/app/services/providers/tts/fish';
-import type { Mood } from '@/app/types';
+import { auth } from '@/auth';
+import { getTTSProvider } from '@/lib/tts';
+import { uploadAudio, isS3Configured, checkObjectExists, downloadAudio } from '@/utils/s3Service';
+import { hashTTSInput } from '@/utils/textHash';
+import { prisma } from '@/utils/prisma';
+import { moodToFishEmotion, injectFishEmotion } from '@/lib/tts/fish';
+import type { Mood } from '@/types';
 
 // Rate limiting configuration
 const RATE_LIMIT_PER_MINUTE = 30; // Adjust based on your Cartesia API tier (this constant still makes sense here)
@@ -73,8 +73,16 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Text is required' }, { status: 400 });
         }
 
+        // Detect mobile user agent and force MP3 format for better compatibility
+        const userAgent = request.headers.get('user-agent') || '';
+        const isMobileUA = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+
         // Get format from query parameter (for Content-Type header)
-        const formatParam = searchParams.get('format');
+        let formatParam = searchParams.get('format');
+        if (isMobileUA && !formatParam) {
+            formatParam = 'mp3';
+            console.log('[TTS API] Forced MP3 format for mobile device');
+        }
         const skipCache = searchParams.get('skipCache') === 'true';
 
         // Get mood from request or database
@@ -142,10 +150,27 @@ export async function POST(request: NextRequest) {
 
                 console.log(`[TTS API] Streamed from S3: ${(audioBuffer.length / 1024).toFixed(1)}KB in ${downloadTime}ms`);
 
-                const stream = new ReadableStream({
+                const chunkSize = 32 * 1024; // 32KB chunks for smoother progressive playback
+                const stream = new ReadableStream<Uint8Array>({
                     start(controller) {
-                        controller.enqueue(audioBuffer);
-                        controller.close();
+                        let offset = 0;
+
+                        const pushChunk = () => {
+                            if (offset >= audioBuffer.length) {
+                                controller.close();
+                                return;
+                            }
+
+                            const end = Math.min(offset + chunkSize, audioBuffer.length);
+                            controller.enqueue(audioBuffer.slice(offset, end));
+                            offset = end;
+
+                            if (offset < audioBuffer.length) {
+                                queueMicrotask(pushChunk);
+                            }
+                        };
+
+                        pushChunk();
                     }
                 });
 
@@ -162,7 +187,9 @@ export async function POST(request: NextRequest) {
                         'Cache-Control': 'public, max-age=31536000',
                         'X-Cache-Status': 'HIT',
                         'X-Cache-Time': String(cacheCheckTime),
+                        'Content-Length': String(audioBuffer.length),
                         ...(formatParam === 'pcm' ? { 'X-Audio-Sample-Rate': '44100' } : {}),
+                        'X-Cache-Source': 's3'
                     },
                 });
             }

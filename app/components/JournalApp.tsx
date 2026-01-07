@@ -2,8 +2,8 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Reflection, AppStatus, ViewMode, HistoryEntry, Mood, ChatMessage, ReflectionProgress, TokenUsage, CumulativeTokenUsage } from '../types';
-import { getJournalReflection, getJournalReflectionStream } from '../services/journalAIService';
-import { StreamingCallback } from '../services/providers/llm/interface';
+import { getJournalReflection, getJournalReflectionStream } from '../lib/core/journal';
+import { StreamingCallback } from '../lib/llm/interface';
 import { showToast, ToastContainer } from '../utils/toast';
 import { generateUUID } from '../utils/uuid';
 import { withRetry } from '../utils/retry';

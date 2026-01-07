@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/app/auth';
-import { prisma } from '@/app/utils/prisma';
+import { auth } from '@/auth';
+import { prisma } from '@/utils/prisma';
 
 /**
  * POST /api/history/audio/s3key

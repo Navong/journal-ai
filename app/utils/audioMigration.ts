@@ -4,7 +4,7 @@
 // but kept for backward compatibility with the migrate-audio page
 
 import { audioCache } from './audioCache';
-import { historyService } from '../services/historyService';
+import { historyService } from '../lib/core/history';
 import { hashText } from './textHash';
 
 export interface MigrationProgress {

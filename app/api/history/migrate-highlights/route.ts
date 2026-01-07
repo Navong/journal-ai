@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/app/auth';
-import { prisma } from '@/app/utils/prisma';
-import { extractHighlightsFromReflection } from '@/app/utils/highlightMigration';
-import logger from '@/app/utils/logger';
+import { auth } from '@/auth';
+import { prisma } from '@/utils/prisma';
+import { extractHighlightsFromReflection } from '@/utils/highlightMigration';
+import logger from '@/utils/logger';
 import { Prisma } from '@prisma/client';
 
 const log = logger.module('MigrateHighlights');

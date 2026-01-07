@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/app/auth';
-import { hashTTSInput } from '@/app/utils/textHash';
+import { auth } from '@/auth';
+import { hashTTSInput } from '@/utils/textHash';
 
 /**
  * POST /api/s3/get-key

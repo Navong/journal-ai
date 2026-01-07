@@ -36,3 +36,5 @@ dist
 tsconfig.tsbuildinfo
 
 CLAUDE*
+
+app/test-*/

@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
-import { getJournalReflectionStream } from '../services/journalAIService';
-import { StreamingCallback } from '../services/providers/llm/interface';
-import { showToast, ToastContainer } from '../utils/toast';
+import React, { useState, useCallback, useEffect } from 'react';
+import { getJournalReflectionStream, setLLMProvider, getCurrentProviderType, checkProviderAvailable } from '@/lib/core/journal';
+import { LLMProviderType } from '@/lib/llm';
+import { StreamingCallback } from '@/lib/llm/interface';
+import { showToast, ToastContainer } from '@/utils/toast';
 
 export default function TestStreamPage() {
   const [entry, setEntry] = useState<string>('');
@@ -12,6 +13,18 @@ export default function TestStreamPage() {
   const [finalResult, setFinalResult] = useState<any>(null);
   const [progressStage, setProgressStage] = useState<string>('');
   const [progressMessage, setProgressMessage] = useState<string>('');
+  const [currentProvider, setCurrentProvider] = useState<LLMProviderType>('gemini');
+
+  // Update current provider when component mounts and when provider changes
+  useEffect(() => {
+    try {
+      setLLMProvider(currentProvider);
+    } catch (error) {
+      console.error('Failed to switch LLM provider:', error);
+      showToast(error instanceof Error ? error.message : 'Failed to switch LLM provider', 'error');
+      // Don't revert - keep the selected provider to show which one fails
+    }
+  }, [currentProvider]);
 
   const handleTestStream = useCallback(async () => {
     if (!entry.trim()) return;
@@ -62,11 +75,76 @@ export default function TestStreamPage() {
       <ToastContainer />
 
       <div className="mb-8">
-        <h1 className="text-3xl font-light text-stone-800 mb-2">Gemini Streaming Test</h1>
-        <p className="text-stone-600">Test the real-time streaming functionality of Gemini reflections</p>
+        <h1 className="text-3xl font-light text-stone-800 mb-2">LLM Streaming Test</h1>
+        <p className="text-stone-600">Test the real-time streaming functionality of AI reflections</p>
       </div>
 
       <div className="space-y-6">
+        {/* Provider Selector */}
+        <div className="bg-white rounded-lg border border-stone-200 p-6">
+          <h2 className="text-xl font-medium text-stone-800 mb-4">LLM Provider</h2>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-stone-700 mb-2">
+                Select AI Provider
+              </label>
+              <div className="flex gap-4">
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    name="provider"
+                    value="gemini"
+                    checked={currentProvider === 'gemini'}
+                    onChange={(e) => setCurrentProvider(e.target.value as LLMProviderType)}
+                    className="mr-2 text-emerald-600 focus:ring-emerald-500"
+                    disabled={isStreaming}
+                  />
+                  <span className="text-stone-700 font-medium">Gemini (Google)</span>
+                  <span className="text-stone-500 text-sm ml-2">• Current default</span>
+                </label>
+
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    name="provider"
+                    value="grok"
+                    checked={currentProvider === 'grok'}
+                    onChange={(e) => setCurrentProvider(e.target.value as LLMProviderType)}
+                    className="mr-2 text-emerald-600 focus:ring-emerald-500"
+                    disabled={isStreaming}
+                  />
+                  <span className="text-stone-700 font-medium">Grok (xAI)</span>
+                  <span className="text-stone-500 text-sm ml-2">• OpenRouter integration</span>
+                </label>
+              </div>
+            </div>
+
+            {currentProvider === 'grok' && (
+              <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
+                <div className="flex items-start gap-2">
+                  <div className="text-amber-600 text-sm">⚠️</div>
+                  <div className="text-amber-800 text-sm">
+                    <strong>Grok Testing Mode:</strong> Requires <code className="bg-amber-100 px-1 rounded">OPENROUTER_API_KEY</code> environment variable.
+                    Ensure you have an OpenRouter account with credits to test Grok 4.1 Fast.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {currentProvider === 'gemini' && (
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                <div className="flex items-start gap-2">
+                  <div className="text-blue-600 text-sm">ℹ️</div>
+                  <div className="text-blue-800 text-sm">
+                    <strong>Gemini Production Mode:</strong> Using Google\'s Gemini API with full context caching and optimizations.
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Input Section */}
         <div className="bg-white rounded-lg border border-stone-200 p-6">
           <h2 className="text-xl font-medium text-stone-800 mb-4">Test Input</h2>
