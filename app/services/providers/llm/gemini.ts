@@ -1156,6 +1156,7 @@ Please provide your reflection and a concise summary.
 
       let accumulatedText = '';
       let finalData: any = null;
+      let lastValidText = '';
 
       // Process streaming chunks
       let isComplete = false;
@@ -1163,7 +1164,10 @@ Please provide your reflection and a concise summary.
 
       for await (const chunk of streamingResponse) {
         const chunkText = chunk.text || '';
-        accumulatedText = chunkText; // Replace, don't append - Gemini sends full text each time
+        if (chunkText) {
+          accumulatedText = chunkText; // Replace, don't append - Gemini sends full text each time
+          lastValidText = chunkText; // Keep track of the last valid text
+        }
 
         // Check if streaming is complete by looking at candidates
         const candidates = chunk.candidates || [];
@@ -1176,19 +1180,21 @@ Please provide your reflection and a concise summary.
         }
 
         // Try to parse JSON from current chunk
-        try {
-          const parsed = JSON.parse(accumulatedText);
-          if (parsed.reflection && parsed.reflection !== lastReflectionText) {
-            // Send chunk to callback only if reflection text has changed
-            await onChunk({
-              text: parsed.reflection,
-              isComplete: false
-            });
-            lastReflectionText = parsed.reflection;
+        if (accumulatedText) {
+          try {
+            const parsed = JSON.parse(accumulatedText);
+            if (parsed.reflection && parsed.reflection !== lastReflectionText) {
+              // Send chunk to callback only if reflection text has changed
+              await onChunk({
+                text: parsed.reflection,
+                isComplete: false
+              });
+              lastReflectionText = parsed.reflection;
+            }
+          } catch (parseError) {
+            // JSON is incomplete, continue
+            log.debug('JSON parsing failed, continuing', { accumulatedLength: accumulatedText.length });
           }
-        } catch (parseError) {
-          // JSON is incomplete, continue
-          log.debug('JSON parsing failed, continuing', { accumulatedLength: accumulatedText.length });
         }
 
         if (isComplete) {
@@ -1196,14 +1202,33 @@ Please provide your reflection and a concise summary.
         }
       }
 
+      // Use the last valid text for final parsing
+      const finalTextToParse = lastValidText || accumulatedText;
+
       // Final parse of complete response
       try {
-        finalData = JSON.parse(accumulatedText);
+        if (finalTextToParse && finalTextToParse.trim()) {
+          finalData = JSON.parse(finalTextToParse);
+        } else {
+          log.warn('No text received from streaming response, using fallback data');
+          finalData = {
+            reflection: lastReflectionText || "I'm processing your thoughts. Thank you for sharing.",
+            summary: "A moment of reflection.",
+            topic: detectedTopic,
+            mood: finalMood,
+            highlights: []
+          };
+        }
       } catch (parseError) {
-        log.error('Failed to parse final streaming response', { accumulatedText: accumulatedText.substring(0, 500) }, parseError as Error);
-        // Fallback: try to extract what we can
+        log.error('Failed to parse final streaming response', {
+          finalTextToParse: finalTextToParse?.substring(0, 500),
+          lastValidText: lastValidText?.substring(0, 500),
+          accumulatedText: accumulatedText?.substring(0, 500),
+          lastReflectionText: lastReflectionText?.substring(0, 500)
+        }, parseError as Error);
+        // Fallback: use the last reflection text we got from streaming
         finalData = {
-          reflection: accumulatedText,
+          reflection: lastReflectionText || "I'm processing your thoughts. Thank you for sharing.",
           summary: "A moment of reflection.",
           topic: detectedTopic,
           mood: finalMood,
