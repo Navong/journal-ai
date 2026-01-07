@@ -3,6 +3,7 @@ import { auth } from '@/app/auth';
 import { prisma } from '@/app/utils/prisma';
 import logger from '@/app/utils/logger';
 import { normalizeUserId } from '@/app/utils/userIdMigration';
+import { deleteAudio, isS3Configured } from '@/app/utils/s3Service';
 
 const log = logger;
 
@@ -285,10 +286,25 @@ export async function DELETE(request: NextRequest) {
 
     if (deleteAll) {
       // Delete all entries for this user using userId from NextAuth
+      // First, fetch all S3 keys for cleanup
+      if (isS3Configured()) {
+        const entriesToDelete = await prisma.journalEntry.findMany({
+          where: { userId: userId },
+          select: { audioS3Key: true },
+        });
+
+        // Delete S3 audio files in parallel (non-blocking, best effort)
+        const s3Keys = entriesToDelete.map(e => e.audioS3Key).filter(Boolean) as string[];
+        if (s3Keys.length > 0) {
+          log.info(`Deleting ${s3Keys.length} S3 audio files for user ${userId}`);
+          await Promise.allSettled(s3Keys.map(key => deleteAudio(key)
+            .catch(err => log.warn(`Failed to delete S3 audio: ${key}`, { key }, err))
+          ));
+        }
+      }
+
       await prisma.journalEntry.deleteMany({
-        where: {
-          userId: userId,
-        },
+        where: { userId: userId },
       });
 
       return NextResponse.json({ success: true });
@@ -296,6 +312,26 @@ export async function DELETE(request: NextRequest) {
 
     if (!entryId) {
       return NextResponse.json({ error: 'Entry ID required' }, { status: 400 });
+    }
+
+    // Delete S3 audio before deleting database entry
+    if (isS3Configured()) {
+      const entry = await prisma.journalEntry.findUnique({
+        where: { id: entryId },
+        select: { audioS3Key: true, userId: true },
+      });
+
+      // Verify ownership
+      if (entry && entry.userId !== userId) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+      }
+
+      // Delete S3 audio if exists (non-blocking, best effort)
+      if (entry?.audioS3Key) {
+        deleteAudio(entry.audioS3Key).catch(err => {
+          log.warn(`Failed to delete S3 audio: ${entry.audioS3Key}`, { audioS3Key: entry.audioS3Key }, err);
+        });
+      }
     }
 
     // Delete entry only if it belongs to the user (security check using userId from NextAuth)

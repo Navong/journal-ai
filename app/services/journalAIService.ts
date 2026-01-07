@@ -1,7 +1,7 @@
 import { HistoryEntry, Mood, ExtractedEntities, Highlight, ReflectionProgressCallback, TokenUsage } from "../types";
 import logger from "../utils/logger";
 import { getLLMProvider } from './providers/llm';
-import { ChatSession } from "./providers/llm/interface";
+import { ChatSession, StreamingCallback } from "./providers/llm/interface";
 
 const log = logger.module('JournalAIService');
 
@@ -20,6 +20,16 @@ export const getJournalReflection = async (
   onProgress?: ReflectionProgressCallback
 ): Promise<{ reflection: string; summary: string; topic?: string; mood?: Mood; entities?: ExtractedEntities; highlights?: Highlight[]; tokenUsage?: TokenUsage }> => {
   return llmProvider.getJournalReflection(entry, mood, history, onProgress);
+};
+
+export const getJournalReflectionStream = async (
+  entry: string,
+  mood: string,
+  history: HistoryEntry[],
+  onChunk: StreamingCallback,
+  onProgress?: ReflectionProgressCallback
+): Promise<{ summary: string; topic?: string; mood?: Mood; entities?: ExtractedEntities; highlights?: Highlight[]; tokenUsage?: TokenUsage }> => {
+  return llmProvider.getJournalReflectionStream(entry, mood, history, onChunk, onProgress);
 };
 
 export const startJournalChat = async (

@@ -23,6 +23,7 @@ interface JournalInterfaceProps {
     selectedMood: Mood;
     onSelectedMoodChange: (mood: Mood) => void;
     reflection: Reflection | null;
+    streamingReflection?: string; // Add streaming reflection text
     status: AppStatus.IDLE | AppStatus.LOADING | AppStatus.SUCCESS | AppStatus.ERROR;
     error: string | null;
     reflectionProgress: ReflectionProgress | null;
@@ -233,14 +234,19 @@ export const JournalInterface: React.FC<JournalInterfaceProps> = (props) => {
                             )}
                         </div>
 
-                        {props.reflection && (
+                        {(props.reflection || (props.status === AppStatus.LOADING && props.streamingReflection)) && (
                             <div className="mb-6">
                                 <h2 className="text-lg md:text-2xl font-light text-stone-800 mb-3 md:mb-4">Reflection</h2>
                                 <div className="prose prose-stone max-w-none">
                                     <p className="text-base md:text-lg font-light text-stone-700 leading-relaxed mb-4">
-                                        {props.reflection.content}
+                                        {props.status === AppStatus.LOADING && props.streamingReflection
+                                            ? props.streamingReflection
+                                            : props.reflection?.content || ''}
+                                        {props.status === AppStatus.LOADING && (
+                                            <span className="inline-block w-2 h-4 bg-emerald-500 ml-1 animate-pulse"></span>
+                                        )}
                                     </p>
-                                    {props.reflection.summary && (
+                                    {props.reflection?.summary && props.status !== AppStatus.LOADING && (
                                         <p className="text-sm md:text-base font-light text-stone-600 italic">
                                             {props.reflection.summary}
                                         </p>

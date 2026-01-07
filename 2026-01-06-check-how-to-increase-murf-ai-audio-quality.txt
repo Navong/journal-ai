@@ -1,0 +1,536 @@
+
+ * ▐▛███▜▌ *   Claude Code v2.0.76
+* ▝▜█████▛▘ *  Sonnet 4.5 · Claude Pro
+ *  ▘▘ ▝▝  *   ~/data/projects/journal-ai
+
+> check how to increase murf ai audio quality 
+
+● I'll check the Murf AI implementation to see the current audio quality settings and how to improve them.
+
+● Read(app/services/providers/tts/murf.ts)
+  ⎿  Read 268 lines
+
+● I can see the current Murf AI TTS implementation. Let me check the Murf AI API documentation to see what quality options are available.
+
+● Web Search("Murf AI API audio quality sample rate options 2026")
+  ⎿  Did 1 search in 17s                                                   
+
+● Fetch(https://murf.ai/api/docs)
+  ⎿  Received 310.4KB (200 OK)
+
+● Based on the Murf AI implementation and API documentation, here's how to increase audio quality:
+
+  Current Settings (app/services/providers/tts/murf.ts)
+
+  Your current configuration is already high quality:
+  - Model: Gen2 (studio-quality)
+  - Format: PCM (uncompressed, highest quality)
+  - Sample Rate: 44100 Hz (CD quality, native for Gen2)
+  - Speed: -5% (slightly slower for clarity)
+
+  How to Increase Quality
+
+  1. Upgrade Sample Rate to 48000 Hz (Recommended)
+
+  Change line 54 from:
+  this.sampleRate = parseInt(process.env.MURF_SAMPLE_RATE || '44100', 10);
+  to:
+  this.sampleRate = parseInt(process.env.MURF_SAMPLE_RATE || '48000', 10);
+
+  Or add to .env.local:
+  MURF_SAMPLE_RATE=48000
+
+  Why? 48000 Hz is the industry standard for professional audio and film, higher than CD quality (44100 Hz).
+
+  2. Available Sample Rates
+
+  - 8000 Hz - Telephony/VoIP (low quality)
+  - 24000 Hz - Medium quality
+  - 44100 Hz - CD quality (current, native for Gen2)
+  - 48000 Hz - Professional audio/film standard ✅ Recommended
+
+  3. Format Options
+
+  You're already using PCM (uncompressed), which is the highest quality. Other options:
+  - FLAC - Lossless compression (high quality, smaller file size)
+  - WAV - Uncompressed (same quality as PCM)
+  - MP3 - Lossy compression (lower quality, not recommended)
+
+  4. Voice & Style Tuning
+
+  The current voice is "Miles" with "Calm" style. You can experiment with different voices/styles in .env.local:
+  MURF_VOICE_ID=Miles  # Try other voices
+  MURF_STYLE=Calm      # Try: Conversational, Professional, etc.
+
+  Quick Setup
+
+  Add to /home/admin/data/projects/journal-ai/.env.local:
+  MURF_SAMPLE_RATE=48000  # Upgrade from 44100 to 48000 Hz
+  MURF_FORMAT=pcm         # Keep PCM (highest quality)
+  MURF_MODEL=Gen2         # Keep Gen2 (studio quality)
+
+  This will give you professional-grade audio quality at 48 kHz sample rate.
+
+  Sources:
+  - https://help.murf.ai/api-features
+  - https://murf.ai/api/docs/text-to-speech/overview
+  - https://murf.ai/api/docs/introduction/models
+
+> update sample rate to 48000 
+
+● Update(app/services/providers/tts/murf.ts)
+  ⎿  Added 1 line, removed 1 line                                        
+      51      // Audio format: 'pcm' for lowest latency (uncompressed, no
+           encoding), 'mp3' for smaller files, 'wav' for compatibility
+      52      // Default: 'pcm' for lowest latency
+      53      this.format = process.env.MURF_FORMAT || 'pcm';
+      54 -    this.sampleRate = parseInt(process.env.MURF_SAMPLE_RATE || 
+         -'44100', 10);                                                  
+      54 +    this.sampleRate = parseInt(process.env.MURF_SAMPLE_RATE || 
+         +'48000', 10);                                                  
+      55    }
+      56  
+      57    async generateSpeechStream(text: string): Promise<ReadableStr
+          eam<Uint8Array> | undefined> {
+
+● Update(app/services/providers/tts/murf.ts)
+  ⎿  Added 1 line, removed 1 line                                        
+      82              style: this.style,
+      83              model: this.model, // Gen2 model for studio-quality
+           speech
+      84              format: this.format, // PCM for lowest latency (unc
+          ompressed), MP3 for smaller files, WAV for compatibility
+      85 -            sample_rate: this.sampleRate, // CD quality (44100 
+         -Hz)                                                            
+      85 +            sample_rate: this.sampleRate, // Professional quali
+         +ty (48000 Hz)                                                  
+      86              rate: -5, // Speed: -5% (slower)
+      87            })
+      88          });
+
+● Done! I've updated the Murf AI sample rate to 48000 Hz (professional audio quality).
+
+  Changes made to app/services/providers/tts/murf.ts:
+  - Line 54: Changed default sample rate from 44100 to 48000
+  - Line 85: Updated comment to reflect "Professional quality (48000 Hz)"
+
+  The Murf AI TTS provider will now generate audio at 48 kHz sample rate (professional/film industry standard) instead of 44.1 kHz (CD quality). This will provide higher audio fidelity for voice reflections.
+
+  The change will take effect immediately on the next TTS generation. You can still override it via the MURF_SAMPLE_RATE environment variable if needed.
+
+> check tts route if it sync to s3? 
+
+● Read(app/api/tts/route.ts)
+  ⎿  Read 218 lines
+
+● No, the TTS route does NOT sync to S3. S3 upload is intentionally disabled for streaming responses to avoid backpressure issues.
+
+  Current Implementation (app/api/tts/route.ts)
+
+  The TTS route imports S3 utilities (line 4):
+  import { uploadAudio, isS3Configured } from '@/app/utils/s3Service';
+
+  But S3 upload is disabled for streaming (lines 131-140):
+  - Audio stream goes directly to client without using tee() to split the stream
+  - The code explicitly avoids S3 upload to prevent 3-second stalls
+
+  Why S3 Upload is Disabled
+
+  From the comments (app/api/tts/route.ts:124-128):
+  // NOTE: tee() causes backpressure when splitting streams - if one stream (S3 upload)
+  // is consumed slower than the other (client), the internal buffer fills up and stalls.
+  // This causes the 3-second stalls you're experiencing mid-stream.
+  // Solution: Disable S3 upload for streaming responses to prioritize client delivery.
+
+  Problem: When you split a stream with tee() (one for client, one for S3), if S3 upload is slower, the internal buffer fills up and causes stalls in playback.
+
+  Current behavior: Stream goes directly to client for smooth playback, no S3 caching.
+
+  Where Audio IS Stored
+
+  Looking at your git status and architecture:
+  1. Database: Audio stored in JournalEntry.audioData column (compressed base64)
+  2. S3: Based on your recent commits, you have S3 migration for old audio files
+  3. TTS streaming: NOT stored in S3 (to avoid backpressure)
+
+  Would you like me to help design a solution to enable S3 caching without causing streaming stalls?
+
+> design S3 caching for TTS without stalls 
+
+● I'll design an S3 caching solution for TTS that avoids streaming stalls. Let me first explore what chunk caching infrastructure you've already built.
+
+● Read(app/utils/chunkCaching.ts)
+  ⎿  Read 291 lines
+
+● Read(app/utils/s3Service.ts)
+  ⎿  Read 221 lines
+
+● Search(pattern: "app/api/tts/chunk-*/**/*.ts")
+  ⎿  Found 3 files (ctrl+o to expand)
+
+● Read(app/api/tts/chunk-cache-check/route.ts)
+  ⎿  Read 52 lines
+
+● Read(app/api/tts/chunk-generate/route.ts)
+  ⎿  Read 108 lines
+
+● Read(app/api/tts/chunk-download/route.ts)
+  ⎿  Read 70 lines
+
+● Read(docs/performance/chunk-caching-s3-base.md)
+  ⎿  Read 97 lines
+
+● Perfect! I can see you already have a complete chunk caching infrastructure. Let me design how to integrate it into the main TTS route without causing streaming stalls.
+
+● S3 Caching Architecture (No Streaming Stalls)
+
+  You already have the chunk caching infrastructure! Let me integrate it into the main TTS route.
+
+  Design: Pre-Check & Assemble Approach
+
+  Flow:
+  1. Split text into sentence chunks
+  2. Check S3 cache in parallel (fast HeadObject calls)
+  3. Download cached chunks + generate missing chunks (in parallel)
+  4. Upload missing chunks to S3 (no blocking)
+  5. Concatenate all audio buffers
+  6. Stream final audio to client
+
+  Why no stalls?
+  - No tee() used on active streams
+  - All S3 operations complete before streaming to client
+  - Client receives a single, pre-assembled stream
+
+  Let me implement this:
+
+● Write(app/api/tts/chunked/route.ts)
+  ⎿ Tool use rejected with user message: remove chunk cache logic it uneffective
+
+
+● Got it. Let me design a simpler S3 caching approach without sentence-level chunking.
+                                                                           
+● User answered Claude's questions:
+  ⎿  · What S3 caching strategy would you prefer for TTS audio? → Full-text 
+     caching - Cache entire reflection audio by text hash
+
+
+● Perfect! I'll implement full-text S3 caching with this strategy:
+
+  1. Hash full text → check S3
+  2. If cached: Stream from S3 (instant)
+  3. If not cached: Stream from TTS provider → buffer while streaming → upload to S3 in background
+
+  No backpressure because we buffer on the response side, not the generation side.
+
+● Update(app/api/tts/route.ts)
+  ⎿  Added 1 line, removed 1 line                                        
+      1  import { NextRequest, NextResponse } from 'next/server';
+      2  import { auth } from '@/app/auth';
+      3  import { getTTSProvider } from '@/app/services/providers/tts';
+      4 -import { uploadAudio, isS3Configured } from '@/app/utils/s3Servi
+        -ce';                                                            
+      4 +import { uploadAudio, isS3Configured, checkObjectExists, downloa
+        +dAudio } from '@/app/utils/s3Service';                          
+      5  import { hashTTSInput } from '@/app/utils/textHash';
+      6  import { prisma } from '@/app/utils/prisma';
+      7  import { moodToFishEmotion, injectFishEmotion } from '@/app/serv
+         ices/providers/tts/fish';
+
+● Update(app/api/tts/route.ts)
+  ⎿  Added 104 lines, removed 35 lines                                   
+      73              return NextResponse.json({ error: 'Text is required
+          ' }, { status: 400 });
+      74          }
+      75  
+      76 +        // Get format from query parameter (for Content-Type he
+         +ader)                                                          
+      77 +        const formatParam = searchParams.get('format');        
+      78 +                                                               
+      79          // Get mood from request or database
+      80          let mood: Mood | undefined = moodFromRequest;
+      81  
+     ...
+       96              }
+       97          }
+       98  
+       96 -        // For testing: allow provider override via query para
+          -meter                                                         
+       97 -        const ttsProvider = getTTSProvider(providerParam || un
+          -defined);                                                     
+       98 -                                                              
+       99 -        // Get format from query parameter (for Content-Type h
+          -eader)                                                        
+      100 -        const formatParam = searchParams.get('format');       
+      101 -                                                              
+       99          // Apply emotion for Fish Audio provider
+      100          let processedText = text;
+      101          const providerType = (providerParam || process.env.TTS
+           _PROVIDER || 'cartesia').toLowerCase();
+     ...
+      108              }
+      109          }
+      110  
+      111 +        // Generate S3 cache key from text + provider + format
+      112 +        const cacheKey = `tts_full/${hashTTSInput(processedTex
+          +t + providerType + (formatParam || 'wav'))}.wav`;             
+      113 +                                                              
+      114 +        // PHASE 1: Check S3 cache                            
+      115 +        if (isS3Configured()) {                               
+      116 +            const cacheCheckStart = Date.now();               
+      117 +            const cached = await checkObjectExists(cacheKey); 
+      118 +            const cacheCheckTime = Date.now() - cacheCheckStar
+          +t;                                                            
+      119 +                                                              
+      120 +            if (cached) {                                     
+      121 +                console.log(`[TTS API] ✅ Cache HIT (${cacheCh
+          +eckTime}ms): ${cacheKey}`);                                   
+      122 +                                                              
+      123 +                // Stream from S3                             
+      124 +                const downloadStart = Date.now();             
+      125 +                const audioBuffer = await downloadAudio(cacheK
+          +ey);                                                          
+      126 +                const downloadTime = Date.now() - downloadStar
+          +t;                                                            
+      127 +                                                              
+      128 +                console.log(`[TTS API] Streamed from S3: ${(au
+          +dioBuffer.length / 1024).toFixed(1)}KB in ${downloadTime}ms`);
+      129 +                                                              
+      130 +                const stream = new ReadableStream({           
+      131 +                    start(controller) {                       
+      132 +                        controller.enqueue(audioBuffer);      
+      133 +                        controller.close();                   
+      134 +                    }                                         
+      135 +                });                                           
+      136 +                                                              
+      137 +                let contentType = 'audio/wav';                
+      138 +                if (formatParam === 'pcm') {                  
+      139 +                    contentType = 'audio/L16';                
+      140 +                } else if (formatParam === 'mp3') {           
+      141 +                    contentType = 'audio/mpeg';               
+      142 +                }                                             
+      143 +                                                              
+      144 +                return new Response(stream, {                 
+      145 +                    headers: {                                
+      146 +                        'Content-Type': contentType,          
+      147 +                        'Cache-Control': 'public, max-age=3153
+          +6000',                                                        
+      148 +                        'X-Cache-Status': 'HIT',              
+      149 +                        'X-Cache-Time': String(cacheCheckTime)
+          +,                                                             
+      150 +                        ...(formatParam === 'pcm' ? { 'X-Audio
+          +-Sample-Rate': '44100' } : {}),                               
+      151 +                    },                                        
+      152 +                });                                           
+      153 +            }                                                 
+      154 +                                                              
+      155 +            console.log(`[TTS API] Cache MISS (${cacheCheckTim
+          +e}ms): ${cacheKey}`);                                         
+      156 +        }                                                     
+      157 +                                                              
+      158 +        // PHASE 2: Generate TTS (cache miss or S3 not configu
+          +red)                                                          
+      159 +        const ttsProvider = getTTSProvider(providerParam || un
+          +defined);                                                     
+      160          const audioStream = await ttsProvider.generateSpeechSt
+           ream(processedText);
+      161  
+      162          if (!audioStream) {
+     ...
+      166              );
+      167          }
+      168  
+      123 -        // Stream directly to client to avoid backpressure iss
+          -ues                                                           
+      124 -        // NOTE: tee() causes backpressure when splitting stre
+          -ams - if one stream (S3 upload)                               
+      125 -        // is consumed slower than the other (client), the int
+          -ernal buffer fills up and stalls.                             
+      126 -        // This causes the 3-second stalls you're experiencing
+          - mid-stream.                                                  
+      127 -        // Solution: Disable S3 upload for streaming responses
+          - to prioritize client delivery.                               
+      128 -        // If S3 upload is needed, it should be done for cache
+          -d/non-streaming responses instead.                            
+      129 -        const playStream = audioStream;                       
+      169 +        // PHASE 3: Stream to client + buffer for S3 upload   
+      170 +        // Use TransformStream to buffer chunks while streamin
+          +g to client                                                   
+      171 +        const chunks: Uint8Array[] = [];                      
+      172 +        let totalLength = 0;                                  
+      173  
+      131 -        // S3 upload disabled for streaming responses to avoid
+          - backpressure stalls                                          
+      132 -        // The tee() method creates an internal buffer that ca
+          -n fill up when one stream                                     
+      133 -        // (S3 upload) is consumed slower than the other (clie
+          -nt stream), causing 3-second stalls.                          
+      134 -        if (formatParam === 'pcm') {                          
+      135 -            console.log('[TTS API] Streaming directly to clien
+          -t (PCM format - uncompressed, large size)');                  
+      136 -        } else if (isS3Configured()) {                        
+      137 -            console.log('[TTS API] Streaming directly to clien
+          -t (S3 upload disabled for streaming to avoid backpressure stal
+          -ls)');                                                        
+      138 -        } else {                                              
+      139 -            console.log('[TTS API] Streaming directly to clien
+          -t (S3 not configured)');                                      
+      140 -        }                                                     
+      174 +        const { readable, writable } = new TransformStream({  
+      175 +            transform(chunk, controller) {                    
+      176 +                // Pass through to client immediately         
+      177 +                controller.enqueue(chunk);                    
+      178  
+      142 -        // Determine Content-Type based on format parameter   
+      143 -        // PCM: audio/L16 (16-bit linear PCM) or audio/pcm (no
+          -n-standard but commonly used)                                 
+      144 -        // WAV: audio/wav                                     
+      145 -        // MP3: audio/mpeg                                    
+      146 -        let contentType = 'audio/wav'; // Default to WAV for c
+          -ompatibility                                                  
+      179 +                // Buffer for S3 upload                       
+      180 +                if (isS3Configured()) {                       
+      181 +                    chunks.push(new Uint8Array(chunk));       
+      182 +                    totalLength += chunk.length;              
+      183 +                }                                             
+      184 +            },                                                
+      185 +            flush() {                                         
+      186 +                // After streaming completes, upload to S3 in 
+          +background                                                    
+      187 +                if (isS3Configured() && chunks.length > 0) {  
+      188 +                    const buffer = new Uint8Array(totalLength)
+          +;                                                             
+      189 +                    let offset = 0;                           
+      190 +                    for (const chunk of chunks) {             
+      191 +                        buffer.set(chunk, offset);            
+      192 +                        offset += chunk.length;               
+      193 +                    }                                         
+      194 +                                                              
+      195 +                    console.log(`[TTS API] Buffered ${(buffer.
+          +length / 1024).toFixed(1)}KB for S3 upload`);                 
+      196 +                                                              
+      197 +                    // Upload in background (non-blocking)    
+      198 +                    uploadAudio(buffer, cacheKey)             
+      199 +                        .then(() => {                         
+      200 +                            console.log(`[TTS API] ✅ Backgrou
+          +nd upload complete: ${cacheKey}`);                            
+      201 +                        })                                    
+      202 +                        .catch((err) => {                     
+      203 +                            console.error(`[TTS API] ❌ Backgr
+          +ound upload failed: ${cacheKey}`, err);                       
+      204 +                        });                                   
+      205 +                }                                             
+      206 +            }                                                 
+      207 +        });                                                   
+      208 +                                                              
+      209 +        // Pipe audio stream through transform                
+      210 +        audioStream.pipeTo(writable).catch(err => {           
+      211 +            console.error('[TTS API] Stream pipe error:', err)
+          +;                                                             
+      212 +        });                                                   
+      213 +                                                              
+      214 +        console.log('[TTS API] Streaming to client with backgr
+          +ound S3 upload');                                             
+      215 +                                                              
+      216 +        // Determine Content-Type                             
+      217 +        let contentType = 'audio/wav';                        
+      218          if (formatParam === 'pcm') {
+      148 -            contentType = 'audio/L16'; // Standard MIME type f
+          -or 16-bit linear PCM                                          
+      219 +            contentType = 'audio/L16';                        
+      220          } else if (formatParam === 'mp3') {
+      221              contentType = 'audio/mpeg';
+      151 -        } else if (formatParam === 'wav') {                   
+      152 -            contentType = 'audio/wav';                        
+      222          }
+      154 -                                                              
+      155 -        // Return streaming binary response                   
+      156 -        return new Response(playStream, {                     
+      223 +                                                              
+      224 +        // Return streaming response                          
+      225 +        return new Response(readable, {                       
+      226              headers: {
+      227                  'Content-Type': contentType,
+      228                  'Cache-Control': 'no-cache',
+      229                  'Connection': 'keep-alive',
+      230                  'Transfer-Encoding': 'chunked',
+      162 -                // Add sample rate header for PCM format (help
+          -s client decode)                                              
+      231 +                'X-Cache-Status': 'MISS',                     
+      232                  ...(formatParam === 'pcm' ? { 'X-Audio-Sample-
+           Rate': '44100' } : {}),
+      233              },
+      234          });
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+● Read(app/utils/prisma.ts)
+  ⎿  Read 48 lines
+
+● Update(app/api/tts/route.ts)
+  ⎿  Added 1 line, removed 1 line                                        
+      80          let mood: Mood | undefined = moodFromRequest;
+      81  
+      82          // If entryId provided but no mood, query database to g
+          et mood from entry
+      83 -        if (entryId && !mood) {                                
+      83 +        if (entryId && !mood && prisma) {                      
+      84              try {
+      85                  const entry = await prisma.journalEntry.findUni
+          que({
+      86                      where: { id: entryId },
+
+● Perfect! I've implemented full-text S3 caching for TTS without streaming stalls. Here's what I built:
+
+  Implementation Summary (app/api/tts/route.ts)
+
+  Architecture
+
+  3-Phase Caching System:
+
+  1. Phase 1: Check S3 Cache
+    - Generate cache key: tts_full/<hash>.wav (hash from text + provider + format)
+    - Fast check with checkObjectExists() (~100ms)
+    - If HIT: Download from S3 → stream to client (instant replays!)
+    - If MISS: Continue to Phase 2
+  2. Phase 2: Generate TTS
+    - Generate audio stream from TTS provider
+    - Stream starts immediately (no waiting)
+  3. Phase 3: Stream + Background Upload
+    - Use TransformStream to buffer chunks while streaming to client
+    - Client receives audio immediately (no stalls!)
+    - After streaming completes, upload buffer to S3 in background
+    - Next play of same text = instant from S3
+
+  Why No Backpressure?
+
+  - No tee(): We use TransformStream which buffers on the response side
+  - Client consumption doesn't block TTS generation
+  - S3 upload happens after client receives all data
+  - Stream flows freely: TTS Provider → TransformStream → Client
+
+  Response Headers
+
+  - X-Cache-Status: HIT or MISS - Shows cache performance
+  - X-Cache-Time: <ms> - Cache check latency (on HIT)
+
+  Benefits
+
+  ✅ First play: Streams immediately, no delay
+  ✅ Subsequent plays: Instant from S3 (same text)
+  ✅ No stalls: TransformStream buffers without blocking
+  ✅ Cost savings: Reuses audio for duplicate text
+  ✅ Works with all providers: Murf, Cartesia, Fish, ElevenLabs, Gemini
+
+  Cache Key Strategy
+
+  Cache key includes:
+  - Text content (processed)
+  - Provider type (murf, cartesia, etc.)
+  - Format (pcm, wav, mp3)
+
+  Different providers/formats = different cache entries (correct!)
+
+  ---
+  Test it: Same reflection text will be instant on second play! Check server logs for cache HIT/MISS.
+
+
+

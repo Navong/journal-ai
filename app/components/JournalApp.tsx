@@ -2,7 +2,8 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Reflection, AppStatus, ViewMode, HistoryEntry, Mood, ChatMessage, ReflectionProgress, TokenUsage, CumulativeTokenUsage } from '../types';
-import { getJournalReflection } from '../services/journalAIService';
+import { getJournalReflection, getJournalReflectionStream } from '../services/journalAIService';
+import { StreamingCallback } from '../services/providers/llm/interface';
 import { showToast, ToastContainer } from '../utils/toast';
 import { generateUUID } from '../utils/uuid';
 import { withRetry } from '../utils/retry';
@@ -51,6 +52,7 @@ const JournalApp: React.FC = () => {
   const [entry, setEntry] = useState<string>('');
   const [selectedMood, setSelectedMood] = useState<Mood>('none');
   const [reflection, setReflection] = useState<Reflection | null>(null);
+  const [streamingReflection, setStreamingReflection] = useState<string>(''); // For streaming text display
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [error, setError] = useState<string | null>(null);
   const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
@@ -143,16 +145,34 @@ const JournalApp: React.FC = () => {
     setIsChatting(false);
     setChatMessages([]);
     setReflectionProgress(null); // Clear previous progress
+    setStreamingReflection(''); // Clear streaming text
     audioProps.stopCurrentAudio();
 
     try {
+      // Streaming callback to update UI in real-time
+      const streamingCallback: StreamingCallback = (chunk) => {
+        console.log('[JournalApp] Received streaming chunk:', chunk);
+        setStreamingReflection(prev => prev + chunk.text);
+
+        if (chunk.isComplete) {
+          console.log('[JournalApp] Streaming completed');
+          // Streaming is complete, will finalize below
+        }
+      };
+
       // Wrap with retry logic for iOS background suspension
-      const { reflection: content, summary, topic, mood: detectedMood, entities, highlights, tokenUsage } = await withRetry(
-        'get-reflection',
-        () => getJournalReflection(entry, selectedMood, history, (progress) => {
-          console.log('[JournalApp] Progress update:', progress.stage, progress.message);
-          setReflectionProgress(progress);
-        }),
+      const { summary, topic, mood: detectedMood, entities, highlights, tokenUsage } = await withRetry(
+        'get-reflection-stream',
+        () => getJournalReflectionStream(
+          entry,
+          selectedMood,
+          history,
+          streamingCallback,
+          (progress) => {
+            console.log('[JournalApp] Progress update:', progress.stage, progress.message);
+            setReflectionProgress(progress);
+          }
+        ),
         3,
         2000
       );
@@ -168,9 +188,13 @@ const JournalApp: React.FC = () => {
           requestCount: prev.requestCount + 1,
         }));
       }
-      console.log(`[JournalApp] Received reflection with topic: "${topic}", mood: "${detectedMood}", entities:`, entities, 'highlights:', highlights);
+
+      console.log(`[JournalApp] Received streaming reflection with topic: "${topic}", mood: "${detectedMood}", entities:`, entities, 'highlights:', highlights);
+
+      // Create the final reflection object with the complete streamed text
+      const finalReflectionContent = streamingReflection;
       const newReflection = {
-        content,
+        content: finalReflectionContent,
         summary,
         timestamp: new Date(),
         topic,
@@ -187,7 +211,7 @@ const JournalApp: React.FC = () => {
       let audioS3Key: string | undefined;
       if (userId && !isDemoMode) {
         try {
-          audioS3Key = generateAudioS3Key(content, userId);
+          audioS3Key = generateAudioS3Key(finalReflectionContent, userId);
           console.log(`[JournalApp] Generated S3 key for entry: ${audioS3Key}`);
         } catch (error) {
           console.warn('[JournalApp] Failed to generate S3 key:', error);
@@ -199,7 +223,7 @@ const JournalApp: React.FC = () => {
         id: newId,
         text: entry,
         summary: summary,
-        reflection: content,
+        reflection: finalReflectionContent,
         mood: detectedMood || selectedMood, // Use AI-detected mood, fallback to selected
         topic: topic,
         timestamp: new Date().toISOString(),
@@ -215,7 +239,7 @@ const JournalApp: React.FC = () => {
       // Auto-generate audio if auto-play is enabled
       if (autoPlayEnabled) {
         console.log('[JournalApp] Auto-generating audio because auto-play is enabled');
-        audioProps.handleTogglePlayback(content, 'main', newId);
+        audioProps.handleTogglePlayback(finalReflectionContent, 'main', newId);
       }
 
       setTimeout(() => {
@@ -259,8 +283,9 @@ const JournalApp: React.FC = () => {
       setError(errorMessage);
       setStatus(AppStatus.ERROR);
       setReflectionProgress(null); // Clear progress on error
+      setStreamingReflection(''); // Clear streaming text on error
     }
-  }, [entry, selectedMood, history, autoPlayEnabled]);
+  }, [entry, selectedMood, history, autoPlayEnabled, streamingReflection]);
 
   // Action handlers
   const handleStartFresh = () => {
@@ -367,6 +392,7 @@ const JournalApp: React.FC = () => {
                   selectedMood={selectedMood}
                   onSelectedMoodChange={setSelectedMood}
                   reflection={reflection}
+                  streamingReflection={streamingReflection}
                   status={status}
                   error={error}
                   reflectionProgress={reflectionProgress}

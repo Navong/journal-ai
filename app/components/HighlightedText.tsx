@@ -34,15 +34,15 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highl
       case 'somatic_stressor':
         // Physical symptoms + external triggers - soft red glow with underline
         return 'underline decoration-red-400 decoration-2 underline-offset-2 text-red-900 font-medium bg-red-50/50 px-0.5 rounded';
-      
+
       case 'identity_win':
         // Achievements + voice + recovery - bold with gold background
         return 'font-bold bg-amber-50 text-amber-900 px-1 py-0.5 rounded shadow-sm';
-      
+
       case 'main_idea':
         // Core insight/main theme - purple background with subtle emphasis
         return 'font-semibold bg-purple-50 text-purple-900 px-1 py-0.5 rounded border-b-2 border-purple-300';
-      
+
       default:
         return 'font-semibold';
     }
@@ -82,7 +82,7 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highl
     // Build regex pattern for all highlight phrases
     const patterns = Array.from(highlightMap.keys()).map(escapeRegex);
     if (patterns.length === 0) return text;
-    
+
     const regex = new RegExp(`\\b(${patterns.join('|')})\\b`, 'gi');
     const parts: React.ReactNode[] = [];
     let lastIndex = 0;
@@ -130,7 +130,7 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highl
     if (typeof node === 'string') {
       return applyHighlights(node);
     }
-    
+
     if (React.isValidElement(node) && node.props) {
       const props = node.props as any;
       const children = props.children;
@@ -139,7 +139,7 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highl
         return React.cloneElement(node, { ...props, children: processedChildren });
       }
     }
-    
+
     return node;
   };
 

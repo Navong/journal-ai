@@ -124,13 +124,15 @@ export class ElevenLabsTTSProvider implements TTSProvider {
                             }
                         };
 
+                        let timeout: NodeJS.Timeout | undefined;
+
                         try {
                             let chunkCount = 0;
                             let totalBytes = 0;
                             const pcmChunks: Uint8Array[] = [];
 
                             // Add timeout for long streams (5 minutes max)
-                            const timeout = setTimeout(() => {
+                            timeout = setTimeout(() => {
                                 log.warn('[TTS API] Stream timeout reached');
                                 safeError(new Error('Stream timeout'));
                             }, 5 * 60 * 1000);
@@ -188,7 +190,7 @@ export class ElevenLabsTTSProvider implements TTSProvider {
                                 log.debug(`[TTS API] ✅ PCM stream complete: ${chunkCount} chunks, ${(wavData.length / 1024).toFixed(1)}KB WAV`);
                             }
                         } catch (error: any) {
-                            clearTimeout(timeout);
+                            if (timeout) clearTimeout(timeout);
                             log.error('[TTS API] Stream error:', error.message);
                             safeError(error);
                             throw error;
