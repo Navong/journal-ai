@@ -1159,9 +1159,11 @@ Please provide your reflection and a concise summary.
 
       // Process streaming chunks
       let isComplete = false;
+      let lastReflectionText = '';
+
       for await (const chunk of streamingResponse) {
         const chunkText = chunk.text || '';
-        accumulatedText += chunkText;
+        accumulatedText = chunkText; // Replace, don't append - Gemini sends full text each time
 
         // Check if streaming is complete by looking at candidates
         const candidates = chunk.candidates || [];
@@ -1173,19 +1175,20 @@ Please provide your reflection and a concise summary.
           }
         }
 
-        // Try to parse JSON as we accumulate text
+        // Try to parse JSON from current chunk
         try {
           const parsed = JSON.parse(accumulatedText);
-          if (parsed.reflection) {
-            // Send chunk to callback
+          if (parsed.reflection && parsed.reflection !== lastReflectionText) {
+            // Send chunk to callback only if reflection text has changed
             await onChunk({
               text: parsed.reflection,
               isComplete: false
             });
+            lastReflectionText = parsed.reflection;
           }
         } catch (parseError) {
-          // JSON is incomplete, continue accumulating
-          log.debug('JSON parsing failed, continuing to accumulate', { accumulatedLength: accumulatedText.length });
+          // JSON is incomplete, continue
+          log.debug('JSON parsing failed, continuing', { accumulatedLength: accumulatedText.length });
         }
 
         if (isComplete) {
