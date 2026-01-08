@@ -4,6 +4,7 @@ Welcome to the Serenity Journal documentation. This folder contains all technica
 
 ## Audio System
 
+- **[Audio System Overview](audio-system-overview.md)** - High-level architecture and data flow for the audio system.
 - **[Storage Format](audio/storage-format.md)** - Audio format pipeline and data flow (WAV → base64 → binary streaming)
 - **[Streaming Implementation](audio/streaming-implementation.md)** - Progressive audio playback implementation
 - **[Cache Optimization](audio/cache-optimization.md)** - Database binary streaming optimization (21s → 1.4s)
@@ -19,6 +20,10 @@ Welcome to the Serenity Journal documentation. This folder contains all technica
 ## API Integration
 
 - **[Gemini Live API](api/gemini-live-api.md)** - Google Gemini API integration and usage
+
+## AI & Core Logic
+
+- **[Context Awareness System](CONTEXT-AWARENESS-README.md)** - Multi-layered AI memory and context caching system.
 
 ## Bug Fixes
 

@@ -16,6 +16,10 @@ out
 build
 dist
 
+.memory*
+
+*/test*
+
 # Environment variables
 .env*.local
 *.local
@@ -36,5 +40,3 @@ dist
 tsconfig.tsbuildinfo
 
 CLAUDE*
-
-app/test-*/
