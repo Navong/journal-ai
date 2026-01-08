@@ -2,9 +2,11 @@
 // Unified audio streaming player for all TTS providers
 
 export type AudioFormat = 'pcm' | 'wav' | 'mp3';
+export type TTSProviderType = 'fish' | 'cartesia' | 'gemini';
 
 export interface AudioStreamPlayerOptions {
   format: AudioFormat;
+  provider?: TTSProviderType; // TTS provider type for provider-specific handling
   sampleRate?: number; // Required for PCM, optional for others (defaults to AudioContext default)
   onLog?: (message: string) => void;
   onProgress?: (bytesReceived: number, totalBytes?: number) => void;
@@ -14,7 +16,7 @@ export interface AudioStreamPlayerOptions {
   audioContext?: AudioContext; // Optional shared AudioContext (pre-unlocked on mobile)
 }
 
-type InternalAudioStreamPlayerOptions = Required<Omit<AudioStreamPlayerOptions, 'audioContext'>> & Pick<AudioStreamPlayerOptions, 'audioContext'>;
+type InternalAudioStreamPlayerOptions = Required<Omit<AudioStreamPlayerOptions, 'audioContext' | 'provider'>> & Pick<AudioStreamPlayerOptions, 'audioContext' | 'provider'>;
 
 export class AudioStreamPlayer {
   private audioContext: AudioContext | null = null;
@@ -40,6 +42,7 @@ export class AudioStreamPlayer {
   constructor(options: AudioStreamPlayerOptions) {
     this.options = {
       format: options.format,
+      provider: options.provider,
       sampleRate: options.sampleRate || 44100,
       onLog: options.onLog || (() => { }),
       onProgress: options.onProgress || (() => { }),
@@ -382,40 +385,74 @@ export class AudioStreamPlayer {
       // Initialize audio context if needed
       await this.initAudioContext();
 
-      // Decode complete audio
+      // Decode complete audio with provider-specific handling
       this.options.onStatusChange('Decoding complete audio...');
       const decodeStart = Date.now();
       let completeAudioBuffer: AudioBuffer;
 
-      if (this.options.format === 'pcm') {
-        completeAudioBuffer = this.pcmToAudioBuffer(completeBuffer, 1);
-      } else if (this.options.format === 'wav') {
-        // WAV format: Extract PCM data (skip 44-byte header) and convert manually
-        // This is more reliable than decodeAudioData for streamed WAV where header size may not match
+      // Provider-specific decoding logic
+      if (this.options.provider === 'fish') {
+        // Fish Audio: WAV format with proper headers
+        this.options.onLog(`🐟 Fish Audio: Decoding WAV format (${completeBuffer.length} bytes)`);
+        if (completeBuffer.length < 44) {
+          throw new Error('Fish Audio WAV data too short for header');
+        }
+
+        // Extract PCM data from WAV (skip 44-byte header)
         const pcmData = completeBuffer.slice(44);
         completeAudioBuffer = this.pcmToAudioBuffer(pcmData, 1);
+
+      } else if (this.options.provider === 'cartesia') {
+        // Cartesia: Raw PCM S16LE format (no headers)
+        this.options.onLog(`🎵 Cartesia: Decoding raw PCM format (${completeBuffer.length} bytes)`);
+        completeAudioBuffer = this.pcmToAudioBuffer(completeBuffer, 1);
+
+      } else if (this.options.provider === 'gemini') {
+        // Gemini: PCM L16 big-endian base64, needs byte swapping to little-endian
+        this.options.onLog(`🤖 Gemini: Converting big-endian PCM to little-endian (${completeBuffer.length} bytes)`);
+
+        // Convert big-endian to little-endian
+        const swappedBuffer = new Uint8Array(completeBuffer.length);
+        for (let i = 0; i < completeBuffer.length; i += 2) {
+          swappedBuffer[i] = completeBuffer[i + 1];     // High byte to low
+          swappedBuffer[i + 1] = completeBuffer[i];     // Low byte to high
+        }
+
+        completeAudioBuffer = this.pcmToAudioBuffer(swappedBuffer, 1);
+
       } else {
-        // MP3 format - use decodeAudioData
-        try {
-          this.options.onLog(`🔊 Attempting to decode MP3 data (${completeBuffer.length} bytes)`);
-          completeAudioBuffer = await this.audioContext!.decodeAudioData(completeBuffer.buffer.slice(0));
-          this.options.onLog(`✅ MP3 decoded successfully: ${completeAudioBuffer.duration.toFixed(2)}s`);
-        } catch (mp3Error: any) {
-          this.options.onLog(`❌ MP3 decode failed: ${mp3Error.message}`);
+        // Fallback: Generic format handling
+        this.options.onLog(`🔊 Generic provider: Using format-based decoding (${this.options.format})`);
 
-          // Check if the data looks like valid MP3
-          const firstBytes = completeBuffer.slice(0, 10);
-          const hexBytes = Array.from(firstBytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
-          this.options.onLog(`📊 First 10 bytes of MP3 data: ${hexBytes}`);
-
-          // If MP3 decode fails, try falling back to PCM/WAV interpretation
-          this.options.onLog(`🔄 Attempting fallback: treating as PCM data`);
+        if (this.options.format === 'pcm') {
+          completeAudioBuffer = this.pcmToAudioBuffer(completeBuffer, 1);
+        } else if (this.options.format === 'wav') {
+          // WAV format: Extract PCM data (skip 44-byte header) and convert manually
+          const pcmData = completeBuffer.slice(44);
+          completeAudioBuffer = this.pcmToAudioBuffer(pcmData, 1);
+        } else {
+          // MP3 format - use decodeAudioData
           try {
-            completeAudioBuffer = this.pcmToAudioBuffer(completeBuffer, 1);
-            this.options.onLog(`✅ Fallback PCM decode successful: ${completeAudioBuffer.duration.toFixed(2)}s`);
-          } catch (pcmError: any) {
-            this.options.onLog(`❌ Fallback PCM decode also failed: ${pcmError.message}`);
-            throw new Error(`Audio decode failed for both MP3 and PCM fallback: MP3 error: ${mp3Error.message}, PCM error: ${pcmError.message}`);
+            this.options.onLog(`🔊 Attempting to decode MP3 data (${completeBuffer.length} bytes)`);
+            completeAudioBuffer = await this.audioContext!.decodeAudioData(completeBuffer.buffer.slice(0));
+            this.options.onLog(`✅ MP3 decoded successfully: ${completeAudioBuffer.duration.toFixed(2)}s`);
+          } catch (mp3Error: any) {
+            this.options.onLog(`❌ MP3 decode failed: ${mp3Error.message}`);
+
+            // Check if the data looks like valid MP3
+            const firstBytes = completeBuffer.slice(0, 10);
+            const hexBytes = Array.from(firstBytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+            this.options.onLog(`📊 First 10 bytes of MP3 data: ${hexBytes}`);
+
+            // If MP3 decode fails, try falling back to PCM/WAV interpretation
+            this.options.onLog(`🔄 Attempting fallback: treating as PCM data`);
+            try {
+              completeAudioBuffer = this.pcmToAudioBuffer(completeBuffer, 1);
+              this.options.onLog(`✅ Fallback PCM decode successful: ${completeAudioBuffer.duration.toFixed(2)}s`);
+            } catch (pcmError: any) {
+              this.options.onLog(`❌ Fallback PCM decode also failed: ${pcmError.message}`);
+              throw new Error(`Audio decode failed for both MP3 and PCM fallback: MP3 error: ${mp3Error.message}, PCM error: ${pcmError.message}`);
+            }
           }
         }
       }

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { AudioStreamPlayer, AudioFormat } from '../utils/audioStreamPlayer';
+import { AudioStreamPlayer, AudioFormat, TTSProviderType } from '../utils/audioStreamPlayer';
 import { generateSpeech, streamToBase64 } from '../utils/audioGeneration';
 import { generateSpeechStream } from '../lib/core/journal';
 import { audioCache } from '../utils/audioCache';
@@ -404,9 +404,26 @@ export const AudioManager: React.FC<AudioManagerProps> = ({
                     }
                 }
 
-                console.log(`[AudioManager] Creating AudioStreamPlayer (${isHistoryAudio ? 'history' : 'reflection'} mode, format: ${audioFormat}, sampleRate: ${sampleRate}Hz)`);
+                // Determine provider type from audio data source
+                let providerType: TTSProviderType | undefined;
+                if (audioData instanceof Response) {
+                    // Try to determine provider from request headers or URL
+                    const contentType = audioData.headers.get('Content-Type') || '';
+                    const url = audioData.url || '';
+
+                    if (url.includes('/fish') || url.includes('fish.audio')) {
+                        providerType = 'fish';
+                    } else if (url.includes('/cartesia') || contentType.includes('audio/L16')) {
+                        providerType = 'cartesia';
+                    } else if (url.includes('/gemini') || url.includes('google')) {
+                        providerType = 'gemini';
+                    }
+                }
+
+                console.log(`[AudioManager] Creating AudioStreamPlayer (${isHistoryAudio ? 'history' : 'reflection'} mode, format: ${audioFormat}, sampleRate: ${sampleRate}Hz, provider: ${providerType || 'unknown'})`);
                 const player = new AudioStreamPlayer({
                     format: audioFormat,
+                    provider: providerType,
                     sampleRate: sampleRate,
                     onLog: (msg) => console.log(`[AudioPlayer] ${msg}`),
                     onStatusChange: (status) => console.log(`[AudioPlayer] Status: ${status}`),
