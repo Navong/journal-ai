@@ -1,0 +1,64 @@
+// Prisma schema for Serenity Journal
+// Simple, clean schema optimized for entry-level understanding
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// User model - stores basic user info from Google OAuth
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  entries       Entry[]
+
+  @@map("users")
+}
+
+// Entry model - the core of the app
+model Entry {
+  id                String    @id @default(cuid())
+  userId            String    @map("user_id")
+
+  // User's journal entry
+  entryText         String    @map("entry_text") @db.Text
+
+  // AI-generated reflection
+  reflectionText    String?   @map("reflection_text") @db.Text
+
+  // Optional mood
+  mood              String?   // calm, joyful, anxious, tired, reflective, heavy
+
+  // Audio storage (S3 key)
+  audioS3Key        String?   @map("audio_s3_key")
+
+  // Timestamps
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Indexes for performance
+  @@index([userId, createdAt(sort: Desc)]) // Fast user queries sorted by date
+  @@index([audioS3Key]) // Fast audio lookups
+
+  @@map("entries")
+}
+
+// Why this schema?
+// 1. Simple: Only 2 tables (User + Entry)
+// 2. Fast: Composite index on [userId, createdAt] for common queries
+// 3. Scalable: S3 keys for audio (not storing binary in DB)
+// 4. Standard: Follows Prisma naming conventions
+// 5. Clean: No legacy fields or complex JSON structures
