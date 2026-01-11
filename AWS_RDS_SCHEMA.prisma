@@ -1,0 +1,79 @@
+// Prisma schema for Serenity Journal (AWS RDS PostgreSQL)
+// Simple, clean schema optimized for entry-level understanding
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // Note: AWS RDS doesn't need DIRECT_URL (that's only for Supabase pooling)
+}
+
+// User model - stores basic user info from Google OAuth
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  entries       Entry[]
+
+  @@map("users")
+}
+
+// Entry model - the core of the app
+model Entry {
+  id                String    @id @default(cuid())
+  userId            String    @map("user_id")
+
+  // User's journal entry
+  entryText         String    @map("entry_text") @db.Text
+
+  // AI-generated reflection
+  reflectionText    String?   @map("reflection_text") @db.Text
+
+  // Optional mood
+  mood              String?   // calm, joyful, anxious, tired, reflective, heavy
+
+  // Audio storage (S3 key)
+  audioS3Key        String?   @map("audio_s3_key")
+
+  // Timestamps
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Indexes for performance
+  @@index([userId, createdAt(sort: Desc)]) // Fast user queries sorted by date
+  @@index([audioS3Key]) // Fast audio lookups
+
+  @@map("entries")
+}
+
+/**
+ * Why this schema works well with AWS RDS:
+ *
+ * 1. Standard PostgreSQL - no special Supabase features
+ * 2. Single DATABASE_URL - no connection pooling complexity
+ * 3. Optimized indexes for common queries
+ * 4. Text fields for long content (entry, reflection)
+ * 5. CUID for IDs (collision-resistant)
+ *
+ * AWS RDS advantages over Supabase:
+ * - More control (security groups, parameters)
+ * - Easier VPC integration for production
+ * - Standard PostgreSQL (no pooling quirks)
+ * - Free tier: db.t3.micro (1 vCPU, 1GB RAM, 20GB storage)
+ *
+ * Connection format:
+ * postgresql://username:password@endpoint:5432/database
+ *
+ * Example:
+ * postgresql://postgres:mypassword@serenity-db.abc123.us-east-1.rds.amazonaws.com:5432/postgres
+ */
