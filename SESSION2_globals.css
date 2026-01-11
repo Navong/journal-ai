@@ -1,0 +1,98 @@
+/* app/globals.css */
+/* Global styles and Tailwind imports */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Global CSS Reset & Base Styles
+ *
+ * What this file does:
+ * - Imports Tailwind CSS utilities
+ * - Defines custom CSS variables (colors, fonts)
+ * - Sets global defaults
+ *
+ * Why these colors?
+ * - Stone: Neutral, calming (for journaling)
+ * - Emerald: Accent color (growth, nature)
+ * - Minimal palette keeps it clean
+ */
+
+:root {
+  --background: #fdfcf8; /* Soft off-white */
+  --foreground: #1c1917; /* Almost black (stone-900) */
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/**
+ * Focus styles for accessibility
+ * Visible keyboard navigation
+ */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #10b981; /* emerald-500 */
+  outline-offset: 2px;
+}
+
+/**
+ * Custom scrollbar (optional, for aesthetics)
+ */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f5f5f4; /* stone-100 */
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d6d3d1; /* stone-300 */
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a29e; /* stone-400 */
+}
+
+/**
+ * Interview talking points:
+ *
+ * Q: "Why use Tailwind CSS?"
+ * A: "Utility-first CSS speeds up development - no context switching
+ *     between files. The framework is well-documented, has great DX,
+ *     and produces smaller CSS bundles (only includes used classes).
+ *     It also enforces design consistency with predefined spacing/colors."
+ *
+ * Q: "What are the trade-offs?"
+ * A: "HTML can look cluttered with many classes. For complex components,
+ *     I'd use CSS modules or styled-components. But for this app,
+ *     Tailwind's simplicity outweighs the verbosity."
+ *
+ * Q: "How do you handle theming?"
+ * A: "I'd use CSS variables (like --background) and Tailwind's dark mode.
+ *     For example: dark:bg-stone-900 dark:text-stone-100.
+ *     The variables make it easy to swap themes without changing HTML."
+ */
