@@ -1,0 +1,82 @@
+// Prisma schema for Serenity Journal (MongoDB version)
+// Simple, clean schema optimized for entry-level understanding
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// User model - stores basic user info from Google OAuth
+model User {
+  id            String    @id @default(auto()) @map("_id") @db.ObjectId
+  email         String    @unique
+  name          String?
+  image         String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  entries       Entry[]
+
+  @@map("users")
+}
+
+// Entry model - the core of the app
+model Entry {
+  id                String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String    @map("user_id") @db.ObjectId
+
+  // User's journal entry
+  entryText         String    @map("entry_text")
+
+  // AI-generated reflection
+  reflectionText    String?   @map("reflection_text")
+
+  // Optional mood
+  mood              String?   // calm, joyful, anxious, tired, reflective, heavy
+
+  // Audio storage (S3 key or any cloud storage)
+  audioKey          String?   @map("audio_key")
+
+  // Timestamps
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("entries")
+}
+
+/**
+ * Key differences from PostgreSQL version:
+ *
+ * 1. @db.ObjectId instead of String for IDs
+ *    - MongoDB uses 12-byte ObjectId (better for distributed systems)
+ *    - Still appears as string in TypeScript
+ *
+ * 2. @default(auto()) for ID generation
+ *    - MongoDB auto-generates ObjectIds
+ *    - No need for cuid() or uuid()
+ *
+ * 3. No @db.Text needed
+ *    - MongoDB has no text size limits like PostgreSQL
+ *
+ * 4. No indexes defined (yet)
+ *    - MongoDB auto-indexes _id fields
+ *    - We can add more later if needed
+ *
+ * 5. Simpler overall!
+ *    - No connection pooling complexity
+ *    - No migration files (MongoDB is schemaless)
+ *    - Just push schema and go
+ *
+ * Why MongoDB works well here:
+ * - Document model fits journal entries (flexible structure)
+ * - No complex joins needed
+ * - Easy to add fields later (like tags, entities)
+ * - Free tier is generous (512MB storage)
+ */
