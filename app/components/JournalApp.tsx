@@ -788,19 +788,19 @@ const JournalApp: React.FC = () => {
       <ToastContainer />
 
       {isDemoMode && (
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3" style={{ marginBottom: 24, padding: '12px 16px', background: '#FEF9F0', border: '1px solid #E8D5A0', borderRadius: 6 }}>
-          <div className="flex items-start gap-2.5 flex-1 min-w-0">
-            <svg xmlns="http://www.w3.org/2000/svg" className="flex-shrink-0 mt-0.5" style={{ width: 16, height: 16, color: '#B5913A' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3" style={{ marginBottom: 24, padding: '10px 16px', background: '#F4F1EB', border: '1px solid #E0D8CE', borderRadius: 4 }}>
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
+            <svg xmlns="http://www.w3.org/2000/svg" className="flex-shrink-0" style={{ width: 14, height: 14, color: '#B5A47A' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <div className="flex-1 min-w-0">
-              <p style={{ fontSize: 12, fontWeight: 500, color: '#7A5C1A', marginBottom: 2 }}>Demo Mode</p>
-              <p style={{ fontSize: 11, color: '#8A6A22', fontWeight: 300, lineHeight: 1.5 }}>Your entries won't be saved. <button onClick={() => window.location.href = '/login'} style={{ textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 0 }}>Sign in</button></p>
-            </div>
+            <p style={{ fontSize: 11, color: '#7A6E60', margin: 0, lineHeight: 1.5, fontFamily: "'Helvetica Neue', sans-serif" }}>
+              <span style={{ letterSpacing: '0.06em', textTransform: 'uppercase', color: '#5C4F3D', marginRight: 6 }}>Demo Mode</span>
+              Your entries won't be saved. <button onClick={() => window.location.href = '/login'} style={{ textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', color: '#7A6E60', padding: 0 }}>Sign in</button>
+            </p>
           </div>
           <button
             onClick={handleExitDemo}
-            style={{ fontSize: 11, color: '#7A5C1A', background: 'none', border: '1px solid #D4B870', borderRadius: 12, padding: '4px 12px', cursor: 'pointer', flexShrink: 0, letterSpacing: '0.05em' }}
+            style={{ fontSize: 10, color: '#7A6E60', background: 'none', border: '1px solid #D4CCC0', borderRadius: 3, padding: '4px 12px', cursor: 'pointer', flexShrink: 0, letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: "'Helvetica Neue', sans-serif" }}
           >
             Exit Demo
           </button>
