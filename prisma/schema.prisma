@@ -17,7 +17,6 @@ model JournalEntry {
   summary        String?  @map("summary")
   topic          String?
   mood           String?
-  audioData      String?  @map("audio_data")  // Compressed audio (base64 encoded MP3/AAC)
   entities       Json?    @map("entities")     // Extracted entities (people, places, events, organizations)
   highlights     Json?    @map("highlights")   // AI-detected phrases to highlight (4 categories)
   createdAt      DateTime @default(now()) @map("created_at")

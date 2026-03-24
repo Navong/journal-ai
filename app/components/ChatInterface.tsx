@@ -9,9 +9,6 @@ interface ChatInterfaceProps {
   onSendMessage: (text: string) => void;
   isSending: boolean;
   onClose: () => void;
-  onTogglePlayback?: (text: string, index: number) => void;
-  activeAudioId?: string | number | null;
-  generatingAudioId?: string | number | null;
   contextRevalidated?: boolean;
 }
 
@@ -20,9 +17,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   onSendMessage,
   isSending,
   onClose,
-  onTogglePlayback,
-  activeAudioId,
-  generatingAudioId,
   contextRevalidated = false
 }) => {
   const [inputText, setInputText] = useState('');
@@ -116,9 +110,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
           )}
 
           {messages.map((msg, i) => {
-            const id = `chat-${i}`;
-            const isPlaying = activeAudioId === id;
-            const isGenerating = generatingAudioId === id;
             const isModel = msg.role === 'model';
 
             return (
@@ -127,37 +118,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 className={`flex flex-col ${isModel ? 'items-start' : 'items-end'} animate-in fade-in duration-500`}
               >
                 <div className={`flex max-w-[95%] md:max-w-[85%] group ${isModel ? 'flex-row' : 'flex-row-reverse'} items-end gap-2 md:gap-3`}>
-                  {isModel && (
-                    <div className="flex-shrink-0 flex flex-col items-center gap-2 mb-2">
-                      <button
-                        onClick={() => onTogglePlayback?.(msg.text, i)}
-                        disabled={isGenerating}
-                        className={`w-8 h-8 md:w-9 md:h-9 rounded-full flex items-center justify-center transition-all duration-300 active:scale-90 ${isGenerating
-                          ? 'bg-stone-50 text-stone-300 cursor-wait'
-                          : isPlaying
-                            ? 'bg-emerald-100 text-emerald-700 shadow-inner'
-                            : 'bg-stone-50 text-stone-300 hover:text-emerald-600 hover:bg-emerald-50'
-                          }`}
-                      >
-                        {isGenerating ? (
-                          <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                        ) : isPlaying ? (
-                          <span className="flex gap-0.5">
-                            <span className="w-0.5 h-2 bg-emerald-600 animate-[bounce_0.6s_infinite]"></span>
-                            <span className="w-0.5 h-3 bg-emerald-600 animate-[bounce_0.8s_infinite]"></span>
-                          </span>
-                        ) : (
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 md:h-4 md:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                          </svg>
-                        )}
-                      </button>
-                    </div>
-                  )}
-
                   <div className={`
                     relative px-4 md:px-6 py-3 md:py-4 rounded-2xl md:rounded-3xl text-sm md:text-base leading-relaxed transition-all
                     ${!isModel
@@ -170,16 +130,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                       </div>
                     ) : (
                       <div className="whitespace-pre-wrap">{msg.text}</div>
-                    )}
-
-                    {isPlaying && isModel && (
-                      <div className="absolute -bottom-4 md:-bottom-5 left-0 flex items-center gap-1.5 opacity-60">
-                        <span className="flex gap-0.5">
-                          <span className="w-0.5 h-1 md:h-1.5 bg-emerald-400 animate-[bounce_0.6s_infinite]"></span>
-                          <span className="w-0.5 h-1.5 md:h-2 bg-emerald-400 animate-[bounce_0.8s_infinite]"></span>
-                        </span>
-                        <span className="text-[8px] md:text-[9px] uppercase tracking-widest font-bold text-emerald-600">Speaking</span>
-                      </div>
                     )}
                   </div>
                 </div>
