@@ -12,7 +12,6 @@ interface PrismaJournalEntry {
   summary?: string | null;
   topic?: string | null;
   mood?: string | null;
-  audioData?: string | null; // Compressed audio (base64)
   entities?: any; // JSON field for extracted entities
   highlights?: any; // JSON field for AI-detected highlights
   createdAt: Date | string;
@@ -36,16 +35,13 @@ function toHistoryEntry(dbEntry: PrismaJournalEntry): HistoryEntry {
       ? dbEntry.createdAt
       : dbEntry.createdAt.toISOString(),
     chatHistory: [], // Initialize empty - chat history is not persisted to DB
-    audioBase64: dbEntry.audioData || undefined, // Load audio from database
     entities: dbEntry.entities as any || undefined, // Parse entities from JSON
     highlights: dbEntry.highlights as any || undefined, // Parse highlights from JSON
   };
 }
 
 // Convert HistoryEntry to API format (for POST requests)
-// IMPORTANT: Only include audio_data if it exists in memory - don't send null/undefined
-// to avoid overwriting existing audio in database when syncing from another device
-function fromHistoryEntry(entry: HistoryEntry, includeAudio = false) {
+function fromHistoryEntry(entry: HistoryEntry) {
   const result: any = {
     id: entry.id,
     entry_text: entry.text,
@@ -64,16 +60,6 @@ function fromHistoryEntry(entry: HistoryEntry, includeAudio = false) {
     highlights: entry.highlights || null,
   };
 
-  // Only include audio_data if:
-  // 1. explicitly requested (includeAudio = true)
-  // 2. AND audioBase64 actually exists (not undefined/null)
-  // This prevents overwriting existing audio in DB when syncing from device without audio in memory
-  if (includeAudio && entry.audioBase64) {
-    result.audio_data = entry.audioBase64;
-  }
-  // If includeAudio is false or audioBase64 is missing, don't include audio_data field
-  // This means the API won't update the audio field, preserving existing audio in DB
-
   return result;
 }
 
@@ -89,14 +75,10 @@ export interface HistoryFetchResult {
 
 export const historyService = {
   // Fetch entries for current user (via API route)
-  // By default, excludes audioData for faster queries (audio is large)
   // Returns entries and pagination info if limit/offset are provided
-  async fetchHistory(options?: { includeAudio?: boolean; limit?: number; offset?: number }): Promise<HistoryEntry[] | HistoryFetchResult> {
+  async fetchHistory(options?: { limit?: number; offset?: number }): Promise<HistoryEntry[] | HistoryFetchResult> {
     try {
       const params = new URLSearchParams();
-      if (options?.includeAudio) {
-        params.set('includeAudio', 'true');
-      }
       if (options?.limit) {
         params.set('limit', options.limit.toString());
       }
@@ -155,17 +137,15 @@ export const historyService = {
   },
 
   // Save multiple entries (batch) via API route
-  // includeAudio: if true, includes audio data in the save (use when audio is in memory)
-  // if false, audio field is omitted to preserve existing audio in database
-  async saveEntries(entries: HistoryEntry[], includeAudio = false): Promise<void> {
+  async saveEntries(entries: HistoryEntry[]): Promise<void> {
     if (entries.length === 0) {
       log.debug('No entries to save, skipping');
       return;
     }
 
     try {
-      const entriesData = entries.map(entry => fromHistoryEntry(entry, includeAudio));
-      log.info(`Saving ${entries.length} entries to database${includeAudio ? ' (with audio)' : ' (audio excluded to preserve DB audio)'}`);
+      const entriesData = entries.map(entry => fromHistoryEntry(entry));
+      log.info(`Saving ${entries.length} entries to database`);
 
       const response = await fetch('/api/history', {
         method: 'POST',
@@ -213,100 +193,6 @@ export const historyService = {
       log.error('Failed to save entries', {}, error as Error);
       // Don't throw - allow app to continue working even if save fails
       throw error; // But let caller know it failed
-    }
-  },
-
-  // Check if audio exists for a specific entry (lightweight check, doesn't fetch audio)
-  async checkEntryAudioExists(entryId: string): Promise<boolean> {
-    try {
-      const response = await fetch(`/api/history/audio?entryId=${encodeURIComponent(entryId)}&checkOnly=true`, {
-        method: 'GET',
-      });
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          return false;
-        }
-        return false;
-      }
-
-      const data = await response.json();
-      return data.exists === true;
-    } catch (error) {
-      log.error('Failed to check audio exists', {}, error as Error);
-      return false;
-    }
-  },
-
-  // Fetch audio data for a specific entry (on-demand loading - only when user clicks play)
-  async fetchEntryAudio(entryId: string): Promise<string | null> {
-    try {
-      const response = await fetch(`/api/history/audio?entryId=${encodeURIComponent(entryId)}`, {
-        method: 'GET',
-      });
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          // Audio not found - entry might not have audio yet
-          log.debug(`Audio not found for entry ${entryId}`);
-          return null;
-        }
-        if (response.status === 500) {
-          log.warn('Database not configured');
-          return null;
-        }
-        throw new Error(`Failed to fetch audio: ${response.status}`);
-      }
-
-      const data = await response.json();
-      log.info(`Successfully fetched audio for entry ${entryId}`);
-      return data.audioData || null;
-    } catch (error) {
-      log.error('Failed to fetch audio', {}, error as Error);
-      return null;
-    }
-  },
-
-  // Save audio data for a specific entry (async optimization)
-  async saveEntryAudio(entryId: string, audioData: string): Promise<void> {
-    try {
-      const response = await fetch('/api/history/audio', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ entryId, audioData }),
-      });
-
-      if (!response.ok) {
-        let errorMessage = 'Failed to save audio';
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.message || errorData.error || errorMessage;
-        } catch (parseError) {
-          // If response isn't JSON, use status text
-          errorMessage = response.statusText || errorMessage;
-        }
-        
-        if (response.status === 500) {
-          log.warn('Database not configured, audio not saved', { entryId });
-          throw new Error('Database not configured');
-        }
-        
-        if (response.status === 400) {
-          log.error('Invalid audio data rejected by server', { entryId, status: response.status, errorMessage });
-          throw new Error(`Invalid audio data: ${errorMessage}`);
-        }
-        
-        log.error('Failed to save audio', { entryId, status: response.status, errorMessage });
-        throw new Error(`Failed to save audio: ${errorMessage} (${response.status})`);
-      }
-
-      log.info(`Successfully saved audio for entry ${entryId}`);
-    } catch (error) {
-      log.error('Failed to save audio', { entryId }, error as Error);
-      // Re-throw so caller can handle it appropriately
-      throw error;
     }
   },
 

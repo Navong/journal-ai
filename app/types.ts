@@ -33,15 +33,6 @@ export interface Reflection {
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
-  audioBase64?: string | string[]; // Support both single audio and chunked audio arrays
-}
-
-export interface AudioPlaybackState {
-  isPlaying: boolean;
-  isPaused: boolean;
-  playbackRate: number;
-  currentTime: number;
-  duration: number;
 }
 
 export interface HistoryEntry {
@@ -53,7 +44,6 @@ export interface HistoryEntry {
   topic?: string; // Detected topic/tag for the journal entry
   timestamp: string;
   chatHistory?: ChatMessage[];
-  audioBase64?: string | string[]; // Store audio for history entries
   entities?: ExtractedEntities; // Extracted entities (people, places, events, organizations)
   highlights?: Highlight[]; // AI-detected phrases to highlight in reflection text
 }
@@ -73,7 +63,6 @@ export enum ViewMode {
 // AI Reflection Generation Progress Tracking
 export type ReflectionProgressStage =
   | 'extracting_entities'  // Extracting people, places, events, organizations
-  | 'detecting_mood'       // Auto-detecting emotional state
   | 'detecting_topic'      // Identifying main subject
   | 'building_context'     // Generating embeddings and semantic search
   | 'generating_reflection'; // Creating the final AI response
