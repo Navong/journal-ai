@@ -18,40 +18,50 @@ export const ReflectionCard: React.FC<ReflectionCardProps> = ({
 
   return (
     <div className="mt-6 md:mt-12 transition-all duration-700 ease-in-out">
-      <div className={`
-        relative p-4 md:p-8 rounded-xl md:rounded-3xl border border-stone-100 shadow-sm
-        ${isLoading ? 'bg-stone-50 animate-pulse' : 'bg-[#F2F6F3]'} 
-        text-stone-800 leading-relaxed
-      `}>
-        {/* Companion Icon */}
-        <div className="absolute -top-4 left-4 md:-top-6 md:left-10 w-9 h-9 md:w-12 md:h-12 bg-emerald-100 rounded-full flex items-center justify-center shadow-sm z-10">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 md:h-6 md:w-6 text-emerald-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-          </svg>
-        </div>
+      <div
+        style={{
+          background: '#F4F1EB',
+          borderLeft: '3px solid #B5A47A',
+          borderRadius: 4,
+          padding: '32px 36px',
+        }}
+        className={isLoading ? 'animate-pulse' : ''}
+      >
+        {!isLoading && reflection && reflection.topic && (
+          <div style={{ marginBottom: 16 }}>
+            <span style={{
+              fontSize: 10,
+              textTransform: 'uppercase',
+              letterSpacing: '0.12em',
+              fontFamily: "'Helvetica Neue', sans-serif",
+              color: '#B5A47A',
+              background: '#EAE4D6',
+              borderRadius: 20,
+              padding: '3px 10px',
+            }}>
+              {reflection.topic}
+            </span>
+          </div>
+        )}
 
-        <div className="pt-4 md:pt-4 space-y-3 md:space-y-4">
-          {isLoading ? (
-            <div className="space-y-3">
-              <div className="h-3.5 bg-stone-200 rounded w-3/4"></div>
-              <div className="h-3.5 bg-stone-200 rounded w-full"></div>
-              <div className="h-3.5 bg-stone-200 rounded w-5/6"></div>
-            </div>
-          ) : (
-            <div className="text-stone-800 font-serif text-base sm:text-lg leading-relaxed" style={{ fontFamily: 'var(--font-lora), serif' }}>
-              <HighlightedText 
-                content={reflection?.content || ''} 
-                highlights={reflection?.highlights}
-              />
-            </div>
-          )}
-        </div>
-
-        {!isLoading && reflection && (
-          <div className="mt-4 md:mt-6">
-            <div className="text-[9px] md:text-xs text-stone-400 font-medium tracking-wide uppercase">
-              A reflection from your companion
-            </div>
+        {isLoading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ height: 14, background: '#E0D8CE', borderRadius: 4, width: '75%' }}></div>
+            <div style={{ height: 14, background: '#E0D8CE', borderRadius: 4, width: '100%' }}></div>
+            <div style={{ height: 14, background: '#E0D8CE', borderRadius: 4, width: '83%' }}></div>
+          </div>
+        ) : (
+          <div style={{
+            fontFamily: 'Georgia, serif',
+            fontSize: 16,
+            lineHeight: 1.85,
+            color: '#4A4238',
+            fontStyle: 'italic',
+          }}>
+            <HighlightedText
+              content={reflection?.content || ''}
+              highlights={reflection?.highlights}
+            />
           </div>
         )}
       </div>
