@@ -3,8 +3,8 @@
 @tailwind utilities;
 
 :root {
-  --font-inter: 'Inter', sans-serif;
-  --font-lora: 'Lora', serif;
+  --font-inter: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-lora: Georgia, 'Times New Roman', serif;
 }
 
 body {
