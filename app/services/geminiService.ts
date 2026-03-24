@@ -586,114 +586,6 @@ async function getSystemInstructionCache(ai: GoogleGenAI): Promise<string | null
   }
 }
 
-export const detectMood = async (entry: string): Promise<Mood> => {
-  const entryLength = entry.trim().length;
-  log.debug('Mood detection called', { entryLength });
-
-  if (!entry.trim() || entryLength < 15) {
-    log.debug('Entry too short for mood detection, defaulting to none', { entryLength });
-    return 'none'; // Need minimum text to detect mood
-  }
-
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    log.warn('No API key available for mood detection, defaulting to none');
-    return 'none'; // Fail silently if no API key
-  }
-
-  log.debug('Starting mood detection');
-  const ai = new GoogleGenAI({ apiKey });
-
-  const moodDetectionPrompt = `Analyze this journal entry and identify the emotional mood or state.
-
-Available moods:
-- "calm" - peaceful, relaxed, serene
-- "joyful" - happy, excited, positive, grateful
-- "anxious" - worried, nervous, stressed, overwhelmed
-- "tired" - exhausted, drained, fatigued
-- "reflective" - thoughtful, contemplative, introspective
-- "heavy" - sad, burdened, melancholic, down
-- "none" - neutral, unclear, or mixed emotions
-
-Guidelines:
-- Return ONE mood that best represents the overall emotional tone
-- Focus on the dominant emotional state
-- If truly neutral or unclear, return "none"
-- Be sensitive to emotional nuances
-
-Journal entry:
-"${entry.trim()}"
-
-Identify the mood:`;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: moodDetectionPrompt,
-      config: {
-        temperature: 0.5, // Lower temperature for more consistent mood detection
-        maxOutputTokens: 20,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            mood: {
-              type: Type.STRING,
-              description: "The emotional mood: calm, joyful, anxious, tired, reflective, heavy, or none"
-            },
-            confidence: {
-              type: Type.STRING,
-              description: "high, medium, or low - how clear the mood is"
-            }
-          },
-          required: ["mood"]
-        }
-      },
-    });
-
-    let detectedMood: Mood = 'none';
-    const responseText = response.text || '';
-    log.debug('Mood detection API response', { responseLength: responseText.length, preview: responseText.substring(0, 100) });
-
-    try {
-      const moodData = JSON.parse(responseText);
-      const rawMood = (moodData.mood || '').toLowerCase().trim();
-      const confidence = moodData.confidence || 'medium';
-
-      log.debug('Parsed mood data', { rawMood, confidence, moodData });
-
-      // Validate mood is one of the allowed values
-      const validMoods: Mood[] = ['calm', 'joyful', 'anxious', 'tired', 'reflective', 'heavy', 'none'];
-      if (validMoods.includes(rawMood as Mood)) {
-        detectedMood = rawMood as Mood;
-        log.info('Mood detected successfully', { mood: detectedMood, confidence });
-      } else {
-        log.warn('Invalid mood detected, defaulting to none', { detectedMood: rawMood, validMoods });
-      }
-    } catch (parseError) {
-      log.warn('JSON parse failed, trying text extraction', { error: parseError, responseText: responseText.substring(0, 200) });
-      // Fallback: try to extract mood from text response
-      const textResponse = responseText.toLowerCase().trim();
-      const validMoods: Mood[] = ['calm', 'joyful', 'anxious', 'tired', 'reflective', 'heavy'];
-      for (const mood of validMoods) {
-        if (textResponse.includes(mood)) {
-          detectedMood = mood;
-          log.info('Extracted mood from text response', { mood: detectedMood });
-          break;
-        }
-      }
-      if (detectedMood === 'none') {
-        log.warn('Could not parse mood from response', { response: textResponse.substring(0, 200) });
-      }
-    }
-
-    return detectedMood;
-  } catch (error) {
-    log.error('Mood detection error', {}, error as Error);
-    return 'none'; // Fail silently, default to 'none'
-  }
-};
-
 export const getJournalReflection = async (
   entry: string,
   mood: string,
@@ -723,26 +615,9 @@ export const getJournalReflection = async (
     // Continue without entities - don't break the flow
   }
 
-  // Step 2: Always auto-detect mood (ignore user-selected mood, use AI detection)
-  onProgress?.({ stage: 'detecting_mood', message: 'Analyzing entry...' });
   let finalMood: Mood = 'none';
-  try {
-    log.debug('Auto-detecting mood for entry', { entryLength: entry.length });
-    const detectedMood = await detectMood(entry);
-    if (detectedMood && detectedMood !== 'none') {
-      finalMood = detectedMood;
-      log.info('Mood detected for reflection', { mood: finalMood });
-    } else {
-      log.debug('No mood detected, using none', { detectedMood });
-      finalMood = 'none';
-    }
-  } catch (moodError) {
-    log.error('Mood detection error during reflection', {}, moodError as Error);
-    // Fallback to 'none' if detection fails
-    finalMood = 'none';
-  }
 
-  // Step 3: Detect topic FIRST so we can use it for better context selection
+  // Step 2: Detect topic FIRST so we can use it for better context selection
   onProgress?.({ stage: 'detecting_topic', message: 'Analyzing entry...' });
   let detectedTopic: string | undefined;
   try {
@@ -1068,15 +943,6 @@ ${historyContext}
     },
   });
 };
-
-function cleanTextForTTS(text: string): string {
-  return text
-    .replace(/[#*`_~]/g, '')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/- /g, '')
-    .replace(/\n+/g, ' ')
-    .trim();
-}
 
 export const detectTopic = async (entry: string): Promise<string | undefined> => {
   const entryLength = entry.trim().length;
