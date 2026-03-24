@@ -2,10 +2,11 @@
 
 import { signIn } from 'next-auth/react';
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [googleLoading, setGoogleLoading] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
   const [devLoading, setDevLoading] = useState(false);
@@ -17,6 +18,19 @@ export default function LoginPage() {
   useEffect(() => {
     setTimeout(() => setFadeIn(true), 80);
   }, []);
+
+  useEffect(() => {
+    const errorParam = searchParams?.get('error');
+    if (errorParam) {
+      if (errorParam === 'OAuthAccountNotLinked') {
+        setError('This email is already linked to another sign-in method.');
+      } else if (errorParam === 'AccessDenied') {
+        setError('Access was denied. Please try again.');
+      } else {
+        setError('Sign in failed. Please try again.');
+      }
+    }
+  }, [searchParams]);
 
   const isLoading = googleLoading || demoLoading || devLoading;
 
@@ -34,6 +48,8 @@ export default function LoginPage() {
     setGoogleLoading(true);
     try {
       await signIn('google', { callbackUrl: '/' });
+      // If execution reaches here, the redirect didn't happen (e.g. popup blocked, config error)
+      setGoogleLoading(false);
     } catch (err) {
       setError('An error occurred. Please try again.');
       setGoogleLoading(false);
