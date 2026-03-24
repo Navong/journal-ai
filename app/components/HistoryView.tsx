@@ -29,7 +29,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [displayedHistory, setDisplayedHistory] = useState<HistoryEntry[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
 
   const toggleExpand = (id: string) => {
     const newExpanded = new Set(expandedEntries);
@@ -76,7 +76,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       const offset = nextPage * ITEMS_PER_PAGE;
 
       // Check if we have more items in the already-loaded history
-      if (offset < history.length) {
+      if (displayedHistory.length < history.length) {
         const nextItems = history.slice(0, offset);
         setDisplayedHistory(nextItems);
         setCurrentPage(nextPage);
