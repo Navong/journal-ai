@@ -37,13 +37,11 @@ export async function GET(request: NextRequest) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const includeAudio = searchParams.get('includeAudio') === 'true';
     const limit = parseInt(searchParams.get('limit') || '0'); // 0 = no limit
     const offset = parseInt(searchParams.get('offset') || '0');
 
-    log.debug(`GET /api/history - Fetching entries for user: ${userId}${includeAudio ? ' (with audio)' : ''}${limit > 0 ? ` (limit: ${limit}, offset: ${offset})` : ''}`);
+    log.debug(`GET /api/history - Fetching entries for user: ${userId}${limit > 0 ? ` (limit: ${limit}, offset: ${offset})` : ''}`);
 
-    // Optimize query: exclude audioData by default (it's large), use select for better performance
     // Use composite index (userId, createdAt DESC) for faster queries
     const entries = await prisma.journalEntry.findMany({
       where: {
@@ -59,7 +57,6 @@ export async function GET(request: NextRequest) {
         mood: true,
         entities: true, // Include entities (people, places, events)
         highlights: true, // Include AI-detected highlights
-        audioData: includeAudio, // Only fetch audio if explicitly requested
         createdAt: true,
         updatedAt: true,
       },
@@ -161,7 +158,6 @@ export async function POST(request: NextRequest) {
             mood: entryData.mood ?? null, // Save auto-detected mood (anxious, calm, etc.) or null if 'none'
             entities: entryData.entities || null, // Save extracted entities (people, places, events)
             highlights: entryData.highlights || null, // Save AI-detected highlights for UI
-            audioData: entryData.audio_data || null,
             createdAt: entryData.created_at ? new Date(entryData.created_at) : new Date(),
           },
           update: {
@@ -172,10 +168,6 @@ export async function POST(request: NextRequest) {
             mood: entryData.mood ?? null, // Save auto-detected mood (anxious, calm, etc.) or null if 'none'
             entities: entryData.entities || null, // Update extracted entities
             highlights: entryData.highlights || null, // Update AI-detected highlights
-            // Only update audioData if it's explicitly provided in the request
-            // If audio_data field is missing/undefined, don't update audio field (preserves existing audio)
-            // This prevents overwriting audio when syncing from device without audio in memory
-            ...(entryData.audio_data !== undefined && entryData.audio_data !== null && { audioData: entryData.audio_data }),
           },
         });
 
