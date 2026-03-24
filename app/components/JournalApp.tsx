@@ -30,13 +30,13 @@ const getAutoPlayKey = (userId: string | null, isDemo: boolean) => {
 const LEGACY_HISTORY_KEY = 'serenity_journal_history';
 const LEGACY_AUTO_PLAY_KEY = 'serenity_journal_autoplay';
 
-const MOODS: { label: string; value: Mood }[] = [
-  { label: 'Calm', value: 'calm' },
-  { label: 'Joyful', value: 'joyful' },
-  { label: 'Reflective', value: 'reflective' },
-  { label: 'Heavy', value: 'heavy' },
-  { label: 'Anxious', value: 'anxious' },
-  { label: 'Tired', value: 'tired' },
+const MOODS: { label: string; value: Mood; color: string; dot: string }[] = [
+  { label: 'Calm', value: 'calm', color: '#7C9885', dot: '#A8C5B0' },
+  { label: 'Joyful', value: 'joyful', color: '#C4956A', dot: '#D4A97A' },
+  { label: 'Reflective', value: 'reflective', color: '#8A7B6E', dot: '#A89B8E' },
+  { label: 'Heavy', value: 'heavy', color: '#6E7A7A', dot: '#8E9A9A' },
+  { label: 'Anxious', value: 'anxious', color: '#9B7FA6', dot: '#B595C0' },
+  { label: 'Tired', value: 'tired', color: '#7A8FA6', dot: '#95A8C0' },
 ];
 
 const JournalApp: React.FC = () => {
@@ -784,99 +784,73 @@ const JournalApp: React.FC = () => {
 
 
   return (
-    <div className="min-h-screen px-4 md:px-6 py-6 md:py-20 max-w-2xl mx-auto flex flex-col">
+    <div className="min-h-screen flex flex-col" style={{ maxWidth: 680, margin: '0 auto', padding: '48px 24px 80px' }}>
       <ToastContainer />
 
       {isDemoMode && (
-        <div className="mb-4 md:mb-6 p-3 md:p-4 bg-amber-50/50 border border-amber-200/50 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 md:gap-4">
-          <div className="flex items-start gap-2.5 md:gap-3 flex-1 min-w-0">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 md:h-5 md:w-5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3" style={{ marginBottom: 24, padding: '12px 16px', background: '#FEF9F0', border: '1px solid #E8D5A0', borderRadius: 6 }}>
+          <div className="flex items-start gap-2.5 flex-1 min-w-0">
+            <svg xmlns="http://www.w3.org/2000/svg" className="flex-shrink-0 mt-0.5" style={{ width: 16, height: 16, color: '#B5913A' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <div className="flex-1 min-w-0">
-              <p className="text-xs md:text-sm font-medium text-amber-900 mb-0.5">Demo Mode</p>
-              <p className="text-[10px] md:text-xs text-amber-700 font-light leading-relaxed">Your entries won't be saved. <button onClick={() => window.location.href = '/login'} className="underline hover:text-amber-900">Sign in</button></p>
+              <p style={{ fontSize: 12, fontWeight: 500, color: '#7A5C1A', marginBottom: 2 }}>Demo Mode</p>
+              <p style={{ fontSize: 11, color: '#8A6A22', fontWeight: 300, lineHeight: 1.5 }}>Your entries won't be saved. <button onClick={() => window.location.href = '/login'} style={{ textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 0 }}>Sign in</button></p>
             </div>
           </div>
           <button
             onClick={handleExitDemo}
-            className="text-[10px] md:text-xs text-amber-700 hover:text-amber-900 font-medium px-3 py-1.5 md:py-1 rounded-full hover:bg-amber-100 transition-colors flex-shrink-0 touch-manipulation"
+            style={{ fontSize: 11, color: '#7A5C1A', background: 'none', border: '1px solid #D4B870', borderRadius: 12, padding: '4px 12px', cursor: 'pointer', flexShrink: 0, letterSpacing: '0.05em' }}
           >
             Exit Demo
           </button>
         </div>
       )}
 
-      <header className="mb-6 md:mb-12 text-center md:text-left flex flex-col md:flex-row md:items-end md:justify-between border-b border-stone-100 pb-4 md:pb-8">
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid #E8E4DD', paddingBottom: 24, marginBottom: 48 }}>
         <div>
-          <h1 className="text-xl md:text-4xl font-light text-stone-800 tracking-tight font-serif mb-0.5 md:mb-2">
-            Serenity Journal
-          </h1>
-          <p className="text-stone-500 text-[10px] md:text-base font-light">
-            A quiet space for your thoughts.
-          </p>
+          <h1 style={{ fontSize: 28, fontWeight: 400, letterSpacing: '-0.02em', color: '#2C2825', margin: 0, lineHeight: 1, fontFamily: 'Georgia, serif' }}>Serenity</h1>
+          <p style={{ fontSize: 12, color: '#A89E92', marginTop: 6, marginBottom: 0, letterSpacing: '0.08em', fontFamily: "'Helvetica Neue', sans-serif", textTransform: 'uppercase' }}>A quiet space for your thoughts</p>
         </div>
-
-        <div className="flex flex-col items-center md:items-end mt-4 md:mt-0 gap-2 md:gap-3">
-          <div className="flex flex-wrap justify-center md:justify-end items-center gap-2 md:gap-4">
-            {history.length > 0 && viewMode === ViewMode.JOURNAL && (
-              <span className="flex items-center gap-1.5 text-[9px] md:text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 md:py-1 rounded-full uppercase tracking-widest font-bold border border-emerald-100 animate-pulse">
-                <span className="w-1 md:w-1.5 h-1 md:h-1.5 bg-emerald-500 rounded-full"></span>
-                Active
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2 md:gap-3">
-            <button
-              onClick={() => setViewMode(viewMode === ViewMode.JOURNAL ? ViewMode.HISTORY : ViewMode.JOURNAL)}
-              className="flex items-center gap-1.5 text-stone-500 hover:text-emerald-700 text-xs md:text-sm transition-colors px-3 py-2 md:py-1 rounded-full hover:bg-emerald-50 touch-manipulation min-h-[44px] md:min-h-0"
-            >
-              {viewMode === ViewMode.JOURNAL ? (
-                <><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> History</>
-              ) : (
-                <><svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg> Journal</>
+        <nav style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
+          <button
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: "'Helvetica Neue', sans-serif", color: viewMode === ViewMode.JOURNAL ? '#5C4F3D' : '#B5A99A', paddingBottom: 2, borderBottom: viewMode === ViewMode.JOURNAL ? '1px solid #5C4F3D' : '1px solid transparent', transition: 'all 0.2s' }}
+            onClick={() => setViewMode(ViewMode.JOURNAL)}
+          >
+            Journal
+          </button>
+          <button
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: "'Helvetica Neue', sans-serif", color: viewMode === ViewMode.HISTORY ? '#5C4F3D' : '#B5A99A', paddingBottom: 2, borderBottom: viewMode === ViewMode.HISTORY ? '1px solid #5C4F3D' : '1px solid transparent', transition: 'all 0.2s' }}
+            onClick={() => setViewMode(ViewMode.HISTORY)}
+          >
+            History
+          </button>
+          {(session?.user || isDemoMode) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {session?.user ? (
+                <button
+                  onClick={() => {
+                    // Clear user's localStorage data before signing out
+                    if (userId) {
+                      localStorage.removeItem(`serenity_journal_history_${userId}`);
+                      localStorage.removeItem(`serenity_journal_autoplay_${userId}`);
+                    }
+                    signOut({ callbackUrl: '/login' });
+                  }}
+                  style={{ width: 28, height: 28, borderRadius: '50%', background: '#E8E4DD', border: 'none', cursor: 'pointer', fontSize: 12, color: '#7A6E60', fontFamily: 'sans-serif', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  title="Sign out"
+                >
+                  {session.user.email?.[0]?.toUpperCase() || 'U'}
+                </button>
+              ) : isDemoMode && (
+                <button
+                  onClick={() => window.location.href = '/login'}
+                  style={{ fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: "'Helvetica Neue', sans-serif", color: '#7A6E60', background: 'none', border: '1px solid #E0D8CE', borderRadius: 12, padding: '4px 12px', cursor: 'pointer' }}
+                >Sign in</button>
               )}
-            </button>
-
-            {(session?.user || isDemoMode) && (
-              <div className="flex items-center gap-2">
-                {session?.user && (
-                  <span className="text-stone-400 text-xs hidden md:inline">
-                    {session.user.email?.split('@')[0]}
-                  </span>
-                )}
-                {session?.user ? (
-                  <button
-                    onClick={() => {
-                      // Clear user's localStorage data before signing out
-                      if (userId) {
-                        localStorage.removeItem(`serenity_journal_history_${userId}`);
-                        localStorage.removeItem(`serenity_journal_autoplay_${userId}`);
-                      }
-                      signOut({ callbackUrl: '/login' });
-                    }}
-                    className="flex items-center gap-1.5 text-stone-400 hover:text-stone-600 text-xs md:text-sm transition-colors px-3 py-2 md:py-1 rounded-full hover:bg-stone-50 touch-manipulation min-h-[44px] md:min-h-0"
-                    title="Sign out"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                    </svg>
-                    <span className="hidden md:inline">Sign out</span>
-                  </button>
-                ) : isDemoMode && (
-                  <button
-                    onClick={() => window.location.href = '/login'}
-                    className="flex items-center gap-1.5 text-emerald-600 hover:text-emerald-700 text-xs md:text-sm transition-colors px-3 py-2 md:py-1 rounded-full hover:bg-emerald-50 font-medium touch-manipulation min-h-[44px] md:min-h-0"
-                    title="Sign in to save your entries"
-                  >
-                    Sign in
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
+            </div>
+          )}
+        </nav>
       </header>
 
       <main className="flex-grow flex flex-col">
@@ -897,119 +871,86 @@ const JournalApp: React.FC = () => {
                   }
                 }}
                 placeholder="How are you feeling right now?"
-                className="w-full min-h-[200px] md:min-h-[350px] bg-transparent text-base md:text-2xl font-light text-stone-800 placeholder-stone-300 border-none outline-none focus:ring-0 focus:outline-none resize-none p-0 leading-[1.6] mb-3 md:mb-4 transition-all duration-300 overflow-hidden"
+                style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', resize: 'none', fontSize: 20, lineHeight: 1.7, color: '#3A3530', fontFamily: 'Georgia, serif', fontWeight: 400, minHeight: 200, padding: 0, boxSizing: 'border-box' as const }}
                 disabled={status === AppStatus.LOADING}
                 autoFocus
               />
 
               {entry.length > 0 && (
-                <div className="flex justify-end">
-                  <span className="text-[9px] md:text-[10px] text-stone-400 uppercase tracking-widest font-bold">
-                    {wordCount} {wordCount === 1 ? 'word' : 'words'}
-                  </span>
+                <div style={{ fontSize: 11, color: '#C4BAB0', letterSpacing: '0.08em', fontFamily: "'Helvetica Neue', sans-serif", textTransform: 'uppercase', textAlign: 'right', marginTop: 8 }}>
+                  {wordCount} {wordCount === 1 ? 'word' : 'words'}
                 </div>
               )}
             </div>
 
-            <div className="sticky bottom-0 md:bottom-8 py-3 md:py-6 pt-4 pb-safe bg-gradient-to-t from-[#FDFCF8] via-[#FDFCF8] to-transparent flex flex-col md:flex-row gap-3 md:gap-4 z-10">
+            {/* Mood selector */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 24, marginBottom: 32 }}>
+              {MOODS.map(m => (
+                <button
+                  key={m.value}
+                  onClick={() => setSelectedMood(selectedMood === m.value ? 'none' : m.value)}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 20,
+                    border: selectedMood === m.value ? `1.5px solid ${m.color}` : '1.5px solid #E0D8CE',
+                    background: selectedMood === m.value ? `${m.dot}22` : 'transparent',
+                    color: selectedMood === m.value ? m.color : '#A89E92',
+                    fontSize: 12,
+                    fontFamily: "'Helvetica Neue', sans-serif",
+                    letterSpacing: '0.05em',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 8 }}>
               <button
                 onClick={handleGetReflection}
                 disabled={isButtonDisabled && status !== AppStatus.LOADING}
-                className={`
-                  group relative flex-grow md:flex-initial px-6 md:px-10 py-3.5 md:py-4 rounded-full font-medium transition-all duration-300 active:scale-95 touch-manipulation min-h-[48px] md:min-h-0
-                  ${status === AppStatus.LOADING
-                    ? '!bg-emerald-900 md:!bg-emerald-800 !text-white md:!text-emerald-50 border-2 border-emerald-800 md:border-0 shadow-lg md:shadow-md cursor-wait'
-                    : isButtonDisabled
-                      ? 'bg-stone-100 text-stone-300 cursor-not-allowed opacity-50'
-                      : '!bg-emerald-900 md:!bg-emerald-800 !text-white md:!text-emerald-50 border-2 border-emerald-800 md:border-0 hover:bg-emerald-950 md:hover:bg-emerald-900 shadow-lg md:shadow-md hover:shadow-xl md:hover:shadow-lg'}
-                `}
-                style={status === AppStatus.LOADING ? { backgroundColor: '#064e3b', color: '#ffffff' } : !isButtonDisabled ? { backgroundColor: '#064e3b' } : undefined}
+                style={{
+                  background: isButtonDisabled ? '#E8E4DD' : '#3A3530',
+                  color: isButtonDisabled ? '#B5A99A' : '#FDFCF8',
+                  border: 'none',
+                  borderRadius: 3,
+                  padding: '14px 32px',
+                  fontSize: 13,
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  fontFamily: "'Helvetica Neue', sans-serif",
+                  cursor: isButtonDisabled ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.3s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
               >
-                <span className={`flex items-center justify-center gap-2 text-sm md:text-base ${status === AppStatus.LOADING ? '!text-white' : ''}`} style={status === AppStatus.LOADING ? { color: '#ffffff' } : undefined}>
-                  {status === AppStatus.LOADING ? (
-                    <>
-                      {/* Mobile: Show detailed progress stage */}
-                      <div className="md:hidden flex items-center gap-2">
-                        {!reflectionProgress ? (
-                          <svg className="animate-spin h-4 w-4 !text-white" viewBox="0 0 24 24" style={{ color: '#ffffff' }}>
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                        ) : reflectionProgress.stage === 'extracting_entities' ? (
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 !text-white animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#ffffff' }}>
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                          </svg>
-                        ) : reflectionProgress.stage === 'detecting_topic' ? (
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 !text-white animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#ffffff' }}>
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-                          </svg>
-                        ) : reflectionProgress.stage === 'building_context' ? (
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 !text-white animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#ffffff' }}>
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                          </svg>
-                        ) : reflectionProgress.stage === 'generating_reflection' ? (
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 !text-white animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#ffffff' }}>
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-                          </svg>
-                        ) : (
-                          <svg className="animate-spin h-4 w-4 !text-white" viewBox="0 0 24 24" style={{ color: '#ffffff' }}>
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                        )}
-                        <span className="!text-white font-semibold" style={{ color: '#ffffff' }}>{reflectionProgress?.message || 'Reflecting...'}</span>
-                      </div>
-
-                      {/* Desktop: Simple spinner */}
-                      <div className="hidden md:flex items-center gap-2">
-                        <svg className="animate-spin h-5 w-5 text-stone-300" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        <span>Reflecting...</span>
-                      </div>
-                    </>
-                  ) : (
-                    <>Get Reflection <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 md:h-5 md:w-5 transition-transform group-hover:translate-x-1" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M12.293 5.293a1 1 0 011.414 0l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-2.293-2.293a1 1 0 010-1.414z" clipRule="evenodd" /></svg></>
-                  )}
-                </span>
+                {status === AppStatus.LOADING ? (
+                  <>
+                    <svg className="animate-spin" style={{ width: 14, height: 14 }} viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    {reflectionProgress?.message || 'Reflecting...'}
+                  </>
+                ) : (
+                  'Reflect'
+                )}
               </button>
 
-              {/* AI Progress Indicator - Desktop Only */}
+              {/* AI Progress Indicator */}
               {reflectionProgress && status === AppStatus.LOADING && (
-                <div className="hidden md:flex items-center gap-2 md:gap-3 px-4 md:px-6 py-2 md:py-3 bg-emerald-50/50 border border-emerald-100 rounded-full animate-in fade-in duration-300">
-                  {/* Animated Icon */}
-                  {reflectionProgress.stage === 'extracting_entities' && (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 md:h-4 md:w-4 text-emerald-600 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
-                  )}
-                  {reflectionProgress.stage === 'detecting_topic' && (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 md:h-4 md:w-4 text-emerald-600 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-                    </svg>
-                  )}
-                  {reflectionProgress.stage === 'building_context' && (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 md:h-4 md:w-4 text-emerald-600 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                  )}
-                  {reflectionProgress.stage === 'generating_reflection' && (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 md:h-4 md:w-4 text-emerald-600 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-                    </svg>
-                  )}
-
-                  {/* Progress Text */}
-                  <span className="text-[9px] md:text-[10px] text-emerald-700 font-medium uppercase tracking-widest">
+                <div className="hidden md:flex items-center gap-2 animate-in fade-in duration-300">
+                  <span style={{ fontSize: 11, color: '#A89E92', textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: "'Helvetica Neue', sans-serif" }}>
                     {reflectionProgress.message}
                   </span>
-
-                  {/* Animated Dots */}
-                  <div className="flex gap-0.5 ml-1">
-                    <span className="w-0.5 md:w-1 h-0.5 md:h-1 bg-emerald-400 rounded-full animate-bounce"></span>
-                    <span className="w-0.5 md:w-1 h-0.5 md:h-1 bg-emerald-400 rounded-full animate-bounce [animation-delay:0.2s]"></span>
-                    <span className="w-0.5 md:w-1 h-0.5 md:h-1 bg-emerald-400 rounded-full animate-bounce [animation-delay:0.4s]"></span>
+                  <div style={{ display: 'flex', gap: 3 }}>
+                    <span className="animate-bounce" style={{ width: 4, height: 4, background: '#B5A47A', borderRadius: '50%', display: 'inline-block' }}></span>
+                    <span className="animate-bounce" style={{ width: 4, height: 4, background: '#B5A47A', borderRadius: '50%', display: 'inline-block', animationDelay: '0.2s' }}></span>
+                    <span className="animate-bounce" style={{ width: 4, height: 4, background: '#B5A47A', borderRadius: '50%', display: 'inline-block', animationDelay: '0.4s' }}></span>
                   </div>
                 </div>
               )}
@@ -1018,30 +959,40 @@ const JournalApp: React.FC = () => {
                 <AlertDialog.Root open={showStartNewDialog} onOpenChange={setShowStartNewDialog}>
                   <AlertDialog.Trigger asChild>
                     <button
-                      className="px-4 md:px-6 py-3 md:py-4 rounded-full text-stone-400 hover:text-stone-600 hover:bg-stone-100 transition-all text-xs md:text-sm font-medium touch-manipulation min-h-[48px] md:min-h-0"
+                      style={{ background: 'transparent', color: '#A89E92', border: '1px solid #E0D8CE', borderRadius: 3, padding: '14px 24px', fontSize: 13, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: "'Helvetica Neue', sans-serif", cursor: 'pointer' }}
                     >
                       Start New
                     </button>
                   </AlertDialog.Trigger>
                   <AlertDialog.Portal>
                     <AlertDialog.Overlay className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 animate-in fade-in" />
-                    <AlertDialog.Content className="fixed top-1/2 left-1/2 bg-white rounded-2xl shadow-2xl border border-stone-200 p-6 md:p-8 max-w-md w-[90vw] z-50 animate-in fade-in zoom-in-95 duration-200">
-                      <AlertDialog.Title className="text-xl md:text-2xl font-semibold text-stone-900 mb-2 font-serif">
+                    <AlertDialog.Content
+                      className="fixed top-1/2 left-1/2 max-w-md w-[90vw] z-50 animate-in fade-in zoom-in-95 duration-200"
+                      style={{
+                        background: '#FDFCF8',
+                        borderRadius: 12,
+                        boxShadow: '0 20px 60px rgba(44,40,37,0.15)',
+                        border: '1px solid #E8E4DD',
+                        padding: '32px',
+                        transform: 'translate(-50%, -50%)',
+                      }}
+                    >
+                      <AlertDialog.Title style={{ fontSize: 20, fontWeight: 400, color: '#2C2825', fontFamily: 'Georgia, serif', marginBottom: 8, marginTop: 0 }}>
                         Start New Session?
                       </AlertDialog.Title>
-                      <AlertDialog.Description className="text-stone-600 mb-6 text-sm md:text-base leading-relaxed">
+                      <AlertDialog.Description style={{ color: '#7A6E60', marginBottom: 24, fontSize: 14, lineHeight: 1.6 }}>
                         This will clear your current writing and reflection. Your previous entries will be saved in history.
                       </AlertDialog.Description>
                       <div className="flex gap-3 justify-end">
                         <AlertDialog.Cancel asChild>
-                          <button className="px-4 py-2 rounded-full text-stone-600 hover:bg-stone-100 transition-colors text-sm font-medium">
+                          <button style={{ padding: '8px 16px', borderRadius: 20, color: '#7A6E60', background: 'none', border: '1px solid #E0D8CE', cursor: 'pointer', fontSize: 13 }}>
                             Cancel
                           </button>
                         </AlertDialog.Cancel>
                         <AlertDialog.Action asChild>
                           <button
                             onClick={handleStartFresh}
-                            className="px-4 py-2 rounded-full bg-emerald-600 text-white hover:bg-emerald-700 transition-colors text-sm font-medium"
+                            style={{ padding: '8px 16px', borderRadius: 20, background: '#3A3530', color: '#FDFCF8', border: 'none', cursor: 'pointer', fontSize: 13 }}
                           >
                             Start New
                           </button>
@@ -1053,7 +1004,7 @@ const JournalApp: React.FC = () => {
               ) : (
                 <button
                   onClick={() => setShowStartNewDialog(true)}
-                  className="px-6 py-2 md:py-4 rounded-full text-stone-400 hover:text-stone-600 hover:bg-stone-100 transition-all text-xs md:text-sm font-medium"
+                  style={{ background: 'transparent', color: '#A89E92', border: '1px solid #E0D8CE', borderRadius: 3, padding: '14px 24px', fontSize: 13, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: "'Helvetica Neue', sans-serif", cursor: 'pointer' }}
                 >
                   Start New
                 </button>
@@ -1069,52 +1020,52 @@ const JournalApp: React.FC = () => {
 
             {/* Token Usage Display */}
             {currentTokenUsage && status === AppStatus.SUCCESS && (
-              <div className="mt-4 px-4 md:px-6 py-3 bg-stone-50/50 border border-stone-100 rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-xs font-semibold text-stone-600 uppercase tracking-wide">Token Usage</h3>
+              <div style={{ marginTop: 16, padding: '12px 16px', background: '#F4F1EB', border: '1px solid #E0D8CE', borderRadius: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <h3 style={{ fontSize: 10, fontWeight: 500, color: '#5C4F3D', textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: "'Helvetica Neue', sans-serif", margin: 0 }}>Token Usage</h3>
                   {cumulativeTokenUsage.requestCount > 1 && (
-                    <span className="text-xs text-stone-400">
+                    <span style={{ fontSize: 11, color: '#A89E92' }}>
                       {cumulativeTokenUsage.requestCount} requests
                     </span>
                   )}
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3" style={{ fontSize: 12 }}>
                   <div>
-                    <div className="text-stone-400 mb-0.5">Input</div>
-                    <div className="font-medium text-stone-700">
+                    <div style={{ color: '#A89E92', marginBottom: 2 }}>Input</div>
+                    <div style={{ fontWeight: 500, color: '#5C4F3D' }}>
                       {currentTokenUsage.promptTokens.toLocaleString()}
                       {currentTokenUsage.cachedTokens && currentTokenUsage.cachedTokens > 0 && (
-                        <span className="text-emerald-600 ml-1" title="Cached tokens (cost savings)">
+                        <span style={{ color: '#7C9885', marginLeft: 4 }} title="Cached tokens (cost savings)">
                           ({currentTokenUsage.cachedTokens.toLocaleString()} cached)
                         </span>
                       )}
                     </div>
                   </div>
                   <div>
-                    <div className="text-stone-400 mb-0.5">Output</div>
-                    <div className="font-medium text-stone-700">
+                    <div style={{ color: '#A89E92', marginBottom: 2 }}>Output</div>
+                    <div style={{ fontWeight: 500, color: '#5C4F3D' }}>
                       {currentTokenUsage.completionTokens.toLocaleString()}
                     </div>
                   </div>
                   <div>
-                    <div className="text-stone-400 mb-0.5">Total</div>
-                    <div className="font-medium text-stone-700">
+                    <div style={{ color: '#A89E92', marginBottom: 2 }}>Total</div>
+                    <div style={{ fontWeight: 500, color: '#5C4F3D' }}>
                       {currentTokenUsage.totalTokens.toLocaleString()}
                     </div>
                   </div>
                   {cumulativeTokenUsage.requestCount > 1 && (
                     <div>
-                      <div className="text-stone-400 mb-0.5">Session Total</div>
-                      <div className="font-medium text-stone-700">
+                      <div style={{ color: '#A89E92', marginBottom: 2 }}>Session Total</div>
+                      <div style={{ fontWeight: 500, color: '#5C4F3D' }}>
                         {cumulativeTokenUsage.totalTokens.toLocaleString()}
                       </div>
                     </div>
                   )}
                 </div>
                 {currentTokenUsage.cachedTokens && currentTokenUsage.cachedTokens > 0 && (
-                  <div className="mt-2 pt-2 border-t border-stone-100">
-                    <div className="flex items-center gap-1.5 text-xs text-emerald-600">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #E0D8CE' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#7C9885' }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" style={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                       </svg>
                       <span>
@@ -1127,12 +1078,12 @@ const JournalApp: React.FC = () => {
             )}
 
             {status === AppStatus.SUCCESS && reflection && (
-              <div className="mt-6 md:mt-8 flex justify-center md:justify-start">
+              <div>
                 <button
                   onClick={() => setIsChatting(true)}
-                  className="text-emerald-700 hover:text-emerald-800 text-xs md:text-sm font-medium flex items-center gap-2 px-6 py-3 rounded-full bg-emerald-50/50 hover:bg-emerald-50 transition-all border border-emerald-100/50 group"
+                  style={{ background: 'none', border: '1px solid #D4CCC0', borderRadius: 3, padding: '10px 20px', fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: "'Helvetica Neue', sans-serif", color: '#7A6E60', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, marginTop: 20 }}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 transition-transform group-hover:scale-110" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg xmlns="http://www.w3.org/2000/svg" style={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                   </svg>
                   Ask a follow-up
@@ -1160,14 +1111,10 @@ const JournalApp: React.FC = () => {
         )}
       </main>
 
-      <footer className="mt-12 md:mt-16 py-6 md:py-8 border-t border-stone-100 flex flex-col md:flex-row justify-between items-center text-stone-400 text-[10px] md:text-xs tracking-widest uppercase gap-4">
-        <div className="text-center md:text-left leading-relaxed">
-          Your thoughts are private and safe. <br />
-          <span className="opacity-60 lowercase font-normal italic">A companion, not professional care.</span>
-        </div>
-        <div className="flex gap-6">
-          <button className={`transition-colors ${viewMode === ViewMode.HISTORY ? 'text-emerald-700 font-bold' : 'hover:text-stone-600'}`} onClick={() => setViewMode(ViewMode.HISTORY)}>History</button>
-        </div>
+      <footer style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: 'linear-gradient(to top, #FDFCF8 70%, transparent)', padding: '16px 24px 20px', textAlign: 'center', pointerEvents: 'none' }}>
+        <p style={{ fontSize: 10, color: '#C4BAB0', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: "'Helvetica Neue', sans-serif", margin: 0 }}>
+          Your thoughts are private and safe.
+        </p>
       </footer>
     </div>
   );
