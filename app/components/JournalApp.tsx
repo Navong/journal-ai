@@ -1,12 +1,10 @@
 'use client';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Reflection, AppStatus, ViewMode, HistoryEntry, Mood, ChatMessage, ReflectionProgress, TokenUsage, CumulativeTokenUsage } from '../types';
-import { getJournalReflection, startJournalChat } from '../services/geminiService';
+import { Reflection, AppStatus, ViewMode, HistoryEntry, Mood, ReflectionProgress } from '../types';
+import { getJournalReflection } from '../services/geminiService';
 import { ReflectionCard } from './ReflectionCard';
 import { HistoryView } from './HistoryView';
-import { ChatInterface } from './ChatInterface';
-import { Chat } from '@google/genai';
 import { showToast, ToastContainer } from '../utils/toast';
 import { generateUUID } from '../utils/uuid';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
@@ -78,24 +76,8 @@ const JournalApp: React.FC = () => {
 
   const [autoPlayEnabled, setAutoPlayEnabled] = useState<boolean>(false); // Default to false until preferences load
 
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [isChatting, setIsChatting] = useState(false);
-  const chatSessionRef = useRef<Chat | null>(null);
-  const [isSendingChat, setIsSendingChat] = useState(false);
-  const [contextRevalidated, setContextRevalidated] = useState(false);
-
   // Reflection generation progress tracking
   const [reflectionProgress, setReflectionProgress] = useState<ReflectionProgress | null>(null);
-
-  // Token usage tracking for cost transparency
-  const [currentTokenUsage, setCurrentTokenUsage] = useState<TokenUsage | null>(null);
-  const [cumulativeTokenUsage, setCumulativeTokenUsage] = useState<CumulativeTokenUsage>({
-    totalPromptTokens: 0,
-    totalCachedTokens: 0,
-    totalCompletionTokens: 0,
-    totalTokens: 0,
-    requestCount: 0,
-  });
 
   const entryRef = useRef(entry);
 
@@ -259,7 +241,7 @@ const JournalApp: React.FC = () => {
               } else {
                 setAutoPlayEnabled(false); // Default to false if no preferences found
               }
-  
+
               // Migrate localStorage data to Supabase if exists
               const legacyHistory = localStorage.getItem(LEGACY_HISTORY_KEY);
               const legacyUserHistory = localStorage.getItem(`serenity_journal_history_${currentUserId}`);
@@ -476,33 +458,13 @@ const JournalApp: React.FC = () => {
 
     setStatus(AppStatus.LOADING);
     setError(null);
-    setIsChatting(false);
-    setChatMessages([]);
-    chatSessionRef.current = null;
     setReflectionProgress(null); // Clear previous progress
 
     try {
-      // Clear context revalidation indicator when new reflection is generated
-      if (contextRevalidated) {
-        setContextRevalidated(false);
-      }
-
-      const { reflection: content, summary, topic, mood: detectedMood, entities, highlights, tokenUsage } = await getJournalReflection(entry, selectedMood, history, (progress) => {
+      const { reflection: content, summary, topic, mood: detectedMood, entities, highlights } = await getJournalReflection(entry, selectedMood, history, (progress) => {
         console.log('[JournalApp] Progress update:', progress.stage, progress.message);
         setReflectionProgress(progress);
       });
-
-      // Update token usage tracking
-      if (tokenUsage) {
-        setCurrentTokenUsage(tokenUsage);
-        setCumulativeTokenUsage(prev => ({
-          totalPromptTokens: prev.totalPromptTokens + tokenUsage.promptTokens,
-          totalCachedTokens: prev.totalCachedTokens + (tokenUsage.cachedTokens || 0),
-          totalCompletionTokens: prev.totalCompletionTokens + tokenUsage.completionTokens,
-          totalTokens: prev.totalTokens + tokenUsage.totalTokens,
-          requestCount: prev.requestCount + 1,
-        }));
-      }
       console.log(`[JournalApp] Received reflection with topic: "${topic}", mood: "${detectedMood}", entities:`, entities, 'highlights:', highlights);
       const newReflection = {
         content,
@@ -592,91 +554,14 @@ const JournalApp: React.FC = () => {
     }
   }, [entry, selectedMood, history]);
 
-  const updateHistoryWithChat = (messages: ChatMessage[]) => {
-    if (!currentHistoryId) return;
-    setHistory(prev => prev.map(h =>
-      h.id === currentHistoryId ? { ...h, chatHistory: messages } : h
-    ));
-  };
-
-  const handleSendMessage = async (text: string) => {
-    if (!chatSessionRef.current) {
-      if (!reflection) return;
-      // Always use the latest history state to ensure deleted entries are excluded
-      chatSessionRef.current = await startJournalChat(entry, reflection.content, selectedMood, history, reflection.topic);
-      // Clear context revalidation indicator when session is recreated
-      if (contextRevalidated) {
-        setContextRevalidated(false);
-        showToast('Context refreshed with updated history', 'success');
-      }
-    }
-
-    const newUserMsg: ChatMessage = { role: 'user', text };
-    const updatedMessagesWithUser = [...chatMessages, newUserMsg];
-    setChatMessages(updatedMessagesWithUser);
-    updateHistoryWithChat(updatedMessagesWithUser);
-    setIsSendingChat(true);
-
-    try {
-      const response = await chatSessionRef.current!.sendMessage({ message: text });
-      const modelText = response.text || "I'm here listening, but I couldn't find the right words just now.";
-      const newModelMsg: ChatMessage = { role: 'model', text: modelText };
-
-      const updatedMessagesWithModel = [...updatedMessagesWithUser, newModelMsg];
-      setChatMessages(updatedMessagesWithModel);
-      updateHistoryWithChat(updatedMessagesWithModel);
-    } catch (err: any) {
-      console.error(err);
-
-      // Parse API error to show user-friendly message
-      let errorMessage = "I'm sorry, I lost my train of thought. Could you say that again?";
-      let toastMessage = "I'm sorry, I couldn't respond right now. Please try again.";
-
-      if (err?.error?.code === 429 || err?.status === 429 || err?.error?.status === 'RESOURCE_EXHAUSTED') {
-        const retryDelay = err?.error?.details?.find((d: any) => d?.['@type']?.includes('RetryInfo'))?.retryDelay ||
-          err?.error?.message?.match(/retry in ([\d.]+)s/)?.[1];
-
-        if (retryDelay) {
-          const seconds = Math.ceil(parseFloat(retryDelay));
-          toastMessage = `Rate limit exceeded. Please wait ${seconds} seconds before trying again.`;
-          errorMessage = `I hit a rate limit. Please wait ${seconds} seconds and try again.`;
-        } else {
-          toastMessage = 'Rate limit exceeded. Please wait a moment and try again.';
-          errorMessage = 'I hit a rate limit. Please wait a moment and try again.';
-        }
-        showToast(toastMessage, 'error');
-      } else if (err?.message) {
-        toastMessage = err.message;
-        showToast(toastMessage, 'error');
-      } else {
-        showToast(toastMessage, 'error');
-      }
-
-      setChatMessages(prev => [...prev, { role: 'model', text: errorMessage }]);
-    } finally {
-      setIsSendingChat(false);
-    }
-  };
-
   const handleStartFresh = () => {
     setShowStartNewDialog(false);
     setSessionKey(prev => prev + 1);
     setEntry('');
     setReflection(null);
-    setChatMessages([]);
-    setIsChatting(false);
     setStatus(AppStatus.IDLE);
     setError(null);
     setCurrentHistoryId(null);
-    setCurrentTokenUsage(null);
-    setCumulativeTokenUsage({
-      totalPromptTokens: 0,
-      totalCachedTokens: 0,
-      totalCompletionTokens: 0,
-      totalTokens: 0,
-      requestCount: 0,
-    });
-    chatSessionRef.current = null;
     if (typeof window !== 'undefined') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -706,13 +591,6 @@ const JournalApp: React.FC = () => {
         showToast('Failed to delete entry', 'error');
         return;
       }
-    }
-
-    // Invalidate chat session if it exists - context needs to be refreshed
-    if (chatSessionRef.current) {
-      chatSessionRef.current = null;
-      // Set indicator to show context will be revalidated
-      setContextRevalidated(true);
     }
 
     showToast('Entry deleted', 'success');
@@ -753,12 +631,6 @@ const JournalApp: React.FC = () => {
         }
         return;
       }
-    }
-
-    // Invalidate chat session if it exists
-    if (chatSessionRef.current) {
-      chatSessionRef.current = null;
-      setContextRevalidated(true);
     }
 
     // Reset current history ID if it was set
@@ -934,26 +806,12 @@ const JournalApp: React.FC = () => {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    {reflectionProgress?.message || 'Reflecting...'}
+                    Reflecting...
                   </>
                 ) : (
                   'Reflect'
                 )}
               </button>
-
-              {/* AI Progress Indicator */}
-              {reflectionProgress && status === AppStatus.LOADING && (
-                <div className="hidden md:flex items-center gap-2 animate-in fade-in duration-300">
-                  <span style={{ fontSize: 11, color: '#A89E92', textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: "'Helvetica Neue', sans-serif" }}>
-                    {reflectionProgress.message}
-                  </span>
-                  <div style={{ display: 'flex', gap: 3 }}>
-                    <span className="animate-bounce" style={{ width: 4, height: 4, background: '#B5A47A', borderRadius: '50%', display: 'inline-block' }}></span>
-                    <span className="animate-bounce" style={{ width: 4, height: 4, background: '#B5A47A', borderRadius: '50%', display: 'inline-block', animationDelay: '0.2s' }}></span>
-                    <span className="animate-bounce" style={{ width: 4, height: 4, background: '#B5A47A', borderRadius: '50%', display: 'inline-block', animationDelay: '0.4s' }}></span>
-                  </div>
-                </div>
-              )}
 
               {isMounted ? (
                 <AlertDialog.Root open={showStartNewDialog} onOpenChange={setShowStartNewDialog}>
@@ -1018,88 +876,6 @@ const JournalApp: React.FC = () => {
               isLoading={status === AppStatus.LOADING}
             />
 
-            {/* Token Usage Display */}
-            {currentTokenUsage && status === AppStatus.SUCCESS && (
-              <div style={{ marginTop: 16, padding: '12px 16px', background: '#F4F1EB', border: '1px solid #E0D8CE', borderRadius: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <h3 style={{ fontSize: 10, fontWeight: 500, color: '#5C4F3D', textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: "'Helvetica Neue', sans-serif", margin: 0 }}>Token Usage</h3>
-                  {cumulativeTokenUsage.requestCount > 1 && (
-                    <span style={{ fontSize: 11, color: '#A89E92' }}>
-                      {cumulativeTokenUsage.requestCount} requests
-                    </span>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3" style={{ fontSize: 12 }}>
-                  <div>
-                    <div style={{ color: '#A89E92', marginBottom: 2 }}>Input</div>
-                    <div style={{ fontWeight: 500, color: '#5C4F3D' }}>
-                      {currentTokenUsage.promptTokens.toLocaleString()}
-                      {currentTokenUsage.cachedTokens && currentTokenUsage.cachedTokens > 0 && (
-                        <span style={{ color: '#7C9885', marginLeft: 4 }} title="Cached tokens (cost savings)">
-                          ({currentTokenUsage.cachedTokens.toLocaleString()} cached)
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ color: '#A89E92', marginBottom: 2 }}>Output</div>
-                    <div style={{ fontWeight: 500, color: '#5C4F3D' }}>
-                      {currentTokenUsage.completionTokens.toLocaleString()}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ color: '#A89E92', marginBottom: 2 }}>Total</div>
-                    <div style={{ fontWeight: 500, color: '#5C4F3D' }}>
-                      {currentTokenUsage.totalTokens.toLocaleString()}
-                    </div>
-                  </div>
-                  {cumulativeTokenUsage.requestCount > 1 && (
-                    <div>
-                      <div style={{ color: '#A89E92', marginBottom: 2 }}>Session Total</div>
-                      <div style={{ fontWeight: 500, color: '#5C4F3D' }}>
-                        {cumulativeTokenUsage.totalTokens.toLocaleString()}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                {currentTokenUsage.cachedTokens && currentTokenUsage.cachedTokens > 0 && (
-                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #E0D8CE' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#7C9885' }}>
-                      <svg xmlns="http://www.w3.org/2000/svg" style={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                      <span>
-                        {currentTokenUsage.cachedTokens.toLocaleString()} tokens served from cache (reduced cost)
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {status === AppStatus.SUCCESS && reflection && (
-              <div>
-                <button
-                  onClick={() => setIsChatting(true)}
-                  style={{ background: 'none', border: '1px solid #D4CCC0', borderRadius: 3, padding: '10px 20px', fontSize: 12, letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: "'Helvetica Neue', sans-serif", color: '#7A6E60', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, marginTop: 20 }}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" style={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                  </svg>
-                  Ask a follow-up
-                </button>
-              </div>
-            )}
-
-            {isChatting && (
-              <ChatInterface
-                messages={chatMessages}
-                contextRevalidated={contextRevalidated}
-                onSendMessage={handleSendMessage}
-                isSending={isSendingChat}
-                onClose={() => setIsChatting(false)}
-              />
-            )}
           </div>
         ) : (
           <HistoryView

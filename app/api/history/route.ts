@@ -1,10 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/app/auth';
-import { prisma } from '@/app/utils/prisma';
 import logger from '@/app/utils/logger';
-import { normalizeUserId } from '@/app/utils/userIdMigration';
+import { connectMongo } from '@/app/utils/mongodb';
+import { JournalEntry } from '@/app/models/JournalEntry';
 
 const log = logger;
+
+export const runtime = 'nodejs';
+
+function toApiEntry(doc: any) {
+  return {
+    id: doc._id,
+    userId: doc.userId,
+    entryText: doc.entryText,
+    reflectionText: doc.reflectionText,
+    summary: doc.summary ?? null,
+    topic: doc.topic ?? null,
+    mood: doc.mood ?? null,
+    entities: doc.entities ?? null,
+    highlights: doc.highlights ?? null,
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+  };
+}
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -13,27 +31,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  if (!prisma) {
-    return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
-  }
+  const mongo = await connectMongo();
+  if (!mongo) return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
 
   // Extract userId from NextAuth session (already hashed)
   let userId = session.user.id;
-  
-  // Check if user has email in session and migrate old format data if needed
-  // This handles users who had data stored with plain email IDs before the hash update
-  if (session.user.email && userId.startsWith('usr_')) {
-    try {
-      const { migrateUserDataByEmail } = await import('@/app/utils/userIdMigration');
-      const migrationResult = await migrateUserDataByEmail(session.user.email, userId);
-      if (migrationResult.entriesMigrated > 0 || migrationResult.preferencesMigrated) {
-        log.info(`[Migration] Migrated data for ${session.user.email.substring(0, 5)}***: ${migrationResult.entriesMigrated} entries, preferences: ${migrationResult.preferencesMigrated}`);
-      }
-    } catch (migrationError) {
-      log.error('[Migration] Failed to migrate user data by email', { email: session.user.email?.substring(0, 5) + '***' }, migrationError as Error);
-      // Continue with current userId even if migration fails
-    }
-  }
 
   try {
     const { searchParams } = new URL(request.url);
@@ -42,29 +44,10 @@ export async function GET(request: NextRequest) {
 
     log.debug(`GET /api/history - Fetching entries for user: ${userId}${limit > 0 ? ` (limit: ${limit}, offset: ${offset})` : ''}`);
 
-    // Use composite index (userId, createdAt DESC) for faster queries
-    const entries = await prisma.journalEntry.findMany({
-      where: {
-        userId: userId,
-      },
-      select: {
-        id: true,
-        userId: true,
-        entryText: true,
-        reflectionText: true,
-        summary: true,
-        topic: true,
-        mood: true,
-        entities: true, // Include entities (people, places, events)
-        highlights: true, // Include AI-detected highlights
-        createdAt: true,
-        updatedAt: true,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-      ...(limit > 0 && { take: limit, skip: offset }),
-    });
+    const query = JournalEntry.find({ userId }).sort({ createdAt: -1 });
+    if (limit > 0) query.skip(offset).limit(limit);
+    const docs = await query.lean();
+    const entries = docs.map(toApiEntry);
 
     log.info(`Found ${entries.length} entries for user ${userId}`);
     return NextResponse.json({
@@ -100,9 +83,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  if (!prisma) {
-    return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
-  }
+  const mongo = await connectMongo();
+  if (!mongo) return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
 
   // Extract userId from NextAuth session
   const userId = session.user.id;
@@ -133,90 +115,52 @@ export async function POST(request: NextRequest) {
 
     log.info(`Received ${entries.length} entries to save for user ${userId}`);
 
-    // Upsert entries with userId from NextAuth for security
-    // We need to check if entry exists and belongs to user before updating
-    let savedCount = 0;
-    let skippedCount = 0;
-    const errors: string[] = [];
-
-    // Optimize: Process entries in parallel for better performance
-    // Removed redundant findUnique - upsert is atomic and handles race conditions
-    // Use Promise.allSettled to process all entries concurrently (much faster than sequential)
-    const results = await Promise.allSettled(
-      entries.map(async (entryData) => {
-        // Upsert with userId in create to ensure ownership
-        // This is atomic and handles race conditions without redundant queries
-        const result = await prisma!.journalEntry.upsert({
-          where: { id: entryData.id },
-          create: {
-            id: entryData.id,
-            userId: userId, // Ensure new entries belong to current user
-            entryText: entryData.entry_text,
-            reflectionText: entryData.reflection_text,
-            summary: entryData.summary || null,
-            topic: entryData.topic || null,
-            mood: entryData.mood ?? null, // Save auto-detected mood (anxious, calm, etc.) or null if 'none'
-            entities: entryData.entities || null, // Save extracted entities (people, places, events)
-            highlights: entryData.highlights || null, // Save AI-detected highlights for UI
-            createdAt: entryData.created_at ? new Date(entryData.created_at) : new Date(),
-          },
+    // Bulk upsert entries keyed by _id (UUID string).
+    // SECURITY: ensure we never allow changing userId on an existing doc.
+    const ops = entries.map((entryData: any) => {
+      const createdAt = entryData.created_at ? new Date(entryData.created_at) : new Date();
+      return {
+        updateOne: {
+          filter: { _id: entryData.id, userId },
           update: {
-            entryText: entryData.entry_text,
-            reflectionText: entryData.reflection_text,
-            summary: entryData.summary || null,
-            topic: entryData.topic || null,
-            mood: entryData.mood ?? null, // Save auto-detected mood (anxious, calm, etc.) or null if 'none'
-            entities: entryData.entities || null, // Update extracted entities
-            highlights: entryData.highlights || null, // Update AI-detected highlights
+            $set: {
+              entryText: entryData.entry_text,
+              reflectionText: entryData.reflection_text,
+              summary: entryData.summary || null,
+              topic: entryData.topic || null,
+              mood: entryData.mood ?? null,
+              entities: entryData.entities || null,
+              highlights: entryData.highlights || null,
+            },
+            $setOnInsert: {
+              _id: entryData.id,
+              userId,
+              createdAt,
+            },
           },
-        });
-
-        // Verify ownership after upsert
-        if (result.userId !== userId) {
-          return { entryId: entryData.id, success: false, reason: 'ownership_mismatch', result };
-        }
-        return { entryId: entryData.id, success: true, result };
-      })
-    );
-
-    // Process results
-    results.forEach((settled, index) => {
-      const entryData = entries[index];
-      if (settled.status === 'fulfilled') {
-        const result = settled.value;
-        if (result.success) {
-        savedCount++;
-          log.debug(`Upserted entry ${result.entryId} for user ${userId}`);
-        } else {
-          skippedCount++;
-          log.warn(`Skipped entry ${result.entryId} - belongs to user ${result.result.userId}, not ${userId}`);
-        }
-      } else {
-        const error = settled.reason;
-        const errorMessage = error?.message || 'Unknown error';
-        const errorCode = error?.code || 'UNKNOWN_ERROR';
-        errors.push(`Entry ${entryData.id}: ${errorMessage} (${errorCode})`);
-        log.error(`Error saving entry ${entryData.id} for user ${userId}`, {
-          entryId: entryData.id,
-          message: errorMessage,
-          code: errorCode,
-        }, error as Error);
-      }
+          upsert: true,
+        },
+      };
     });
 
-    if (errors.length > 0) {
-      log.error(`Failed to save ${errors.length} entries`, { errors, savedCount, skippedCount });
-      return NextResponse.json({
-        success: savedCount > 0,
-        saved: savedCount,
-        skipped: skippedCount,
-        errors: errors.length,
-        message: `Saved ${savedCount}, skipped ${skippedCount}, errors: ${errors.length}`
-      }, { status: errors.length === entries.length ? 500 : 207 }); // 207 = Multi-Status
-    }
+    const result = await JournalEntry.bulkWrite(ops, { ordered: false });
 
-    log.info(`Successfully saved ${savedCount} entries for user ${userId}`);
-    return NextResponse.json({ success: true, saved: savedCount, skipped: skippedCount });
+    const saved =
+      (result.upsertedCount || 0) +
+      (result.modifiedCount || 0) +
+      (result.matchedCount || 0);
+
+    log.info(`Bulk upsert complete for user ${userId}`, {
+      matched: result.matchedCount,
+      modified: result.modifiedCount,
+      upserted: result.upsertedCount,
+    });
+
+    return NextResponse.json({
+      success: true,
+      saved,
+      skipped: 0,
+    });
   } catch (error: any) {
     log.error('Failed to save entries', { userId }, error);
     // Check if it's a timeout error
@@ -245,25 +189,11 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  if (!prisma) {
-    return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
-  }
+  const mongo = await connectMongo();
+  if (!mongo) return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
 
   // Extract userId from NextAuth session (already hashed)
   let userId = session.user.id;
-  
-  // Check if user has email in session and migrate old format data if needed
-  if (session.user.email && userId.startsWith('usr_')) {
-    try {
-      const { migrateUserDataByEmail } = await import('@/app/utils/userIdMigration');
-      const migrationResult = await migrateUserDataByEmail(session.user.email, userId);
-      if (migrationResult.entriesMigrated > 0 || migrationResult.preferencesMigrated) {
-        log.info(`[Migration] Migrated data for ${session.user.email.substring(0, 5)}***: ${migrationResult.entriesMigrated} entries, preferences: ${migrationResult.preferencesMigrated}`);
-      }
-    } catch (migrationError) {
-      log.error('[Migration] Failed to migrate user data by email', { email: session.user.email?.substring(0, 5) + '***' }, migrationError as Error);
-    }
-  }
 
   let entryId: string | null = null;
   try {
@@ -272,12 +202,7 @@ export async function DELETE(request: NextRequest) {
     const deleteAll = searchParams.get('all') === 'true';
 
     if (deleteAll) {
-      // Delete all entries for this user using userId from NextAuth
-      await prisma.journalEntry.deleteMany({
-        where: {
-          userId: userId,
-        },
-      });
+      await JournalEntry.deleteMany({ userId });
 
       return NextResponse.json({ success: true });
     }
@@ -286,13 +211,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Entry ID required' }, { status: 400 });
     }
 
-    // Delete entry only if it belongs to the user (security check using userId from NextAuth)
-    await prisma.journalEntry.deleteMany({
-      where: {
-        id: entryId,
-        userId: userId, // Verify ownership using userId from NextAuth
-      },
-    });
+    await JournalEntry.deleteOne({ _id: entryId, userId });
 
     return NextResponse.json({ success: true });
   } catch (error) {

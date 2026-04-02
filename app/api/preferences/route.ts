@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/app/auth';
-import { prisma } from '@/app/utils/prisma';
 // Migration will be imported dynamically if needed
+import { connectMongo } from '@/app/utils/mongodb';
+import { UserPreference } from '@/app/models/UserPreference';
+
+export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -10,22 +13,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  if (!prisma) {
-    return NextResponse.json({ preferences: null });
-  }
+  const mongo = await connectMongo();
+  if (!mongo) return NextResponse.json({ preferences: null });
 
   // Extract userId from NextAuth session
   const userId = session.user.id;
 
   try {
-    const preferences = await prisma.userPreference.findUnique({
-      where: {
-        userId: userId, // Use userId from NextAuth
-      },
-      select: {
-        autoPlayEnabled: true,
-      },
-    });
+    const preferences = await UserPreference.findOne({ userId }).lean();
 
     return NextResponse.json({
       preferences: preferences
@@ -45,43 +40,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  if (!prisma) {
-    return NextResponse.json({ success: true }); // Silently fail if not configured
-  }
+  const mongo = await connectMongo();
+  if (!mongo) return NextResponse.json({ success: true }); // Silently fail if not configured
 
   // Extract userId from NextAuth session (already hashed)
   let userId = session.user.id;
-  
-  // Check if user has email in session and migrate old format data if needed
-  if (session.user.email && userId.startsWith('usr_')) {
-    try {
-      const { migrateUserDataByEmail } = await import('@/app/utils/userIdMigration');
-      const migrationResult = await migrateUserDataByEmail(session.user.email, userId);
-      if (migrationResult.entriesMigrated > 0 || migrationResult.preferencesMigrated) {
-        console.log(`[Migration] Migrated data for ${session.user.email.substring(0, 5)}***: ${migrationResult.entriesMigrated} entries, preferences: ${migrationResult.preferencesMigrated}`);
-      }
-    } catch (migrationError) {
-      console.error('[Migration] Failed to migrate user data by email', migrationError);
-    }
-  }
 
   try {
     const body = await request.json();
     const { auto_play_enabled } = body;
 
-    // Upsert preferences using userId from NextAuth
-    await prisma.userPreference.upsert({
-      where: {
-        userId: userId, // Use userId from NextAuth
-      },
-      update: {
-        autoPlayEnabled: auto_play_enabled ?? true,
-      },
-      create: {
-        userId: userId, // Use userId from NextAuth
-        autoPlayEnabled: auto_play_enabled ?? true,
-      },
-    });
+    await UserPreference.findOneAndUpdate(
+      { userId },
+      { $set: { autoPlayEnabled: auto_play_enabled ?? true } },
+      { upsert: true, new: true }
+    );
 
     return NextResponse.json({ success: true });
   } catch (error) {

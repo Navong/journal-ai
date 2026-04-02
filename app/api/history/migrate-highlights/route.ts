@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/app/auth';
-import { prisma } from '@/app/utils/prisma';
 import { extractHighlightsFromReflection } from '@/app/utils/highlightMigration';
 import logger from '@/app/utils/logger';
-import { Prisma } from '@prisma/client';
+import { connectMongo } from '@/app/utils/mongodb';
+import { JournalEntry } from '@/app/models/JournalEntry';
 
 const log = logger.module('MigrateHighlights');
+
+export const runtime = 'nodejs';
 
 // GET: Get stats about entries needing highlight migration
 export async function GET(request: NextRequest) {
@@ -15,27 +17,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  if (!prisma) {
-    return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
-  }
+  const mongo = await connectMongo();
+  if (!mongo) return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
 
   const userId = session.user.id;
 
   try {
-    // Count total entries
-    const totalEntries = await prisma.journalEntry.count({
-      where: { userId },
-    });
-
-    // Count entries already processed (have migrated_at marker in highlights JSON)
-    // We use a simple approach: count entries where highlights is not null
-    // The migration will track processed entries separately
-    const entriesWithHighlights = await prisma.journalEntry.count({
-      where: {
-        userId,
-        NOT: { highlights: { equals: Prisma.DbNull } },
-      },
-    });
+    const [totalEntries, entriesWithHighlights] = await Promise.all([
+      JournalEntry.countDocuments({ userId }),
+      JournalEntry.countDocuments({ userId, highlights: { $ne: null } }),
+    ]);
 
     const entriesWithoutHighlights = totalEntries - entriesWithHighlights;
 
@@ -67,9 +58,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  if (!prisma) {
-    return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
-  }
+  const mongo = await connectMongo();
+  if (!mongo) return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
 
   const userId = session.user.id;
 
@@ -82,19 +72,11 @@ export async function POST(request: NextRequest) {
     log.info('Starting highlight migration', { userId, batchSize, delayMs, offset });
 
     // Get ALL entries (sorted by createdAt desc, with offset for pagination)
-    const entriesToProcess = await prisma.journalEntry.findMany({
-      where: { userId },
-      select: {
-        id: true,
-        reflectionText: true,
-        createdAt: true,
-      },
-      orderBy: {
-        createdAt: 'desc', // Process newest first
-      },
-      skip: offset,
-      take: batchSize,
-    });
+    const entriesToProcess = await JournalEntry.find({ userId }, { _id: 1, reflectionText: 1, createdAt: 1 })
+      .sort({ createdAt: -1 })
+      .skip(offset)
+      .limit(batchSize)
+      .lean();
 
     if (entriesToProcess.length === 0) {
       log.info('No more entries to migrate', { userId, offset });
@@ -126,21 +108,19 @@ export async function POST(request: NextRequest) {
         const highlights = await extractHighlightsFromReflection(entry.reflectionText);
 
         if (highlights.length > 0) {
-          // Update entry with new highlights (cast to Prisma InputJsonValue)
-          await prisma.journalEntry.update({
-            where: { id: entry.id },
-            data: { highlights: highlights as unknown as Prisma.InputJsonValue },
-          });
+          await JournalEntry.updateOne(
+            { _id: entry._id, userId },
+            { $set: { highlights } }
+          );
           updated++;
-          log.debug(`Updated entry ${entry.id} with ${highlights.length} highlights`);
+          log.debug(`Updated entry ${entry._id} with ${highlights.length} highlights`);
         } else {
-          // Mark as processed with empty array
-          await prisma.journalEntry.update({
-            where: { id: entry.id },
-            data: { highlights: [] as unknown as Prisma.InputJsonValue },
-          });
+          await JournalEntry.updateOne(
+            { _id: entry._id, userId },
+            { $set: { highlights: [] } }
+          );
           skipped++;
-          log.debug(`Entry ${entry.id} has no highlights to extract`);
+          log.debug(`Entry ${entry._id} has no highlights to extract`);
         }
 
         // Rate limiting delay (skip on last iteration)
@@ -149,15 +129,15 @@ export async function POST(request: NextRequest) {
         }
       } catch (error: any) {
         errors++;
-        const errorMsg = `Entry ${entry.id}: ${error?.message || 'Unknown error'}`;
+        const errorMsg = `Entry ${entry._id}: ${error?.message || 'Unknown error'}`;
         errorDetails.push(errorMsg);
-        log.error(`Failed to migrate highlights for entry ${entry.id}`, {}, error);
+        log.error(`Failed to migrate highlights for entry ${entry._id}`, {}, error);
       }
     }
 
     // Calculate next offset and remaining
     const nextOffset = offset + entriesToProcess.length;
-    const totalEntries = await prisma.journalEntry.count({ where: { userId } });
+    const totalEntries = await JournalEntry.countDocuments({ userId });
     const remaining = Math.max(0, totalEntries - nextOffset);
 
     log.info('Highlight migration batch complete', {
