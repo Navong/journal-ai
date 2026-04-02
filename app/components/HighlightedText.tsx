@@ -11,11 +11,7 @@ interface HighlightedTextProps {
 }
 
 /**
- * Highlights phrases in reflection text based on AI-detected categories
- * Uses 2 focused categories for clean visual narrative:
- * 1. Somatic Stressor - Physical symptoms + external triggers (red underline)
- * 2. Identity Win - Achievements + voice/agency + emotional recovery (gold highlight)
- * 
+ * Highlights phrases via underline only (decoration color varies by category).
  * Also processes markdown syntax (bold, italic, etc.)
  */
 export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highlights }) => {
@@ -28,23 +24,18 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({ content, highl
     );
   }
 
-  // Get style class for each highlight type
+  // Underline-only emphasis; decoration color hints category (tooltip has full label)
   const getStyleForType = (type: HighlightType): string => {
+    const base = 'underline decoration-2 underline-offset-[3px]';
     switch (type) {
       case 'somatic_stressor':
-        // Physical symptoms + external triggers - soft red glow with underline
-        return 'underline decoration-red-400 decoration-2 underline-offset-2 text-red-900 font-medium bg-red-50/50 px-0.5 rounded';
-      
+        return `${base} decoration-red-500`;
       case 'identity_win':
-        // Achievements + voice + recovery - bold with gold background
-        return 'font-bold bg-amber-50 text-amber-900 px-1 py-0.5 rounded shadow-sm';
-      
+        return `${base} decoration-amber-600`;
       case 'main_idea':
-        // Core insight/main theme - purple background with subtle emphasis
-        return 'font-semibold bg-purple-50 text-purple-900 px-1 py-0.5 rounded border-b-2 border-purple-300';
-      
+        return `${base} decoration-purple-600`;
       default:
-        return 'font-semibold';
+        return `${base} decoration-stone-500`;
     }
   };
 
