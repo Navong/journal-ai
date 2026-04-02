@@ -9,6 +9,7 @@ interface PrismaJournalEntry {
   userId: string;
   entryText: string;
   reflectionText: string;
+  reflectionAudioUrl?: string | null;
   summary?: string | null;
   topic?: string | null;
   mood?: string | null;
@@ -29,6 +30,7 @@ function toHistoryEntry(dbEntry: PrismaJournalEntry): HistoryEntry {
     text: dbEntry.entryText,
     summary: dbEntry.summary || undefined,
     reflection: dbEntry.reflectionText,
+    reflectionAudioUrl: dbEntry.reflectionAudioUrl || undefined,
     mood: (dbEntry.mood as Mood) || 'none',
     topic: dbEntry.topic || undefined,
     timestamp: typeof dbEntry.createdAt === 'string'
@@ -46,6 +48,7 @@ function fromHistoryEntry(entry: HistoryEntry) {
     id: entry.id,
     entry_text: entry.text,
     reflection_text: entry.reflection,
+    reflection_audio_url: entry.reflectionAudioUrl || null,
     summary: entry.summary || null,
     topic: entry.topic || null,
     // Always include mood - save detected mood to database

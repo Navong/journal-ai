@@ -8,11 +8,14 @@ import { HighlightedText } from './HighlightedText';
 interface ReflectionCardProps {
   reflection: Reflection | null;
   isLoading: boolean;
+  /** Play / stop / generate voice — rendered inside the card panel */
+  audioActions?: React.ReactNode;
 }
 
 export const ReflectionCard: React.FC<ReflectionCardProps> = ({
   reflection,
   isLoading,
+  audioActions,
 }) => {
   if (!reflection && !isLoading) return null;
 
@@ -64,6 +67,12 @@ export const ReflectionCard: React.FC<ReflectionCardProps> = ({
             />
           </div>
         )}
+
+        {!isLoading && reflection && audioActions ? (
+          <div className="mt-5 flex justify-end gap-2 border-t border-[#E0D8CE] pt-4 -mx-2 px-2">
+            {audioActions}
+          </div>
+        ) : null}
       </div>
     </div>
   );

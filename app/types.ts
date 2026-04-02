@@ -40,6 +40,7 @@ export interface HistoryEntry {
   text: string;
   summary?: string;
   reflection: string;
+  reflectionAudioUrl?: string; // S3 URL for generated reflection TTS audio
   mood: Mood;
   topic?: string; // Detected topic/tag for the journal entry
   timestamp: string;

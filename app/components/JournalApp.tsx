@@ -76,6 +76,12 @@ const JournalApp: React.FC = () => {
 
   const [autoPlayEnabled, setAutoPlayEnabled] = useState<boolean>(false); // Default to false until preferences load
 
+  // Minimal audio playback (single HTMLAudioElement)
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [activeAudioEntryId, setActiveAudioEntryId] = useState<string | null>(null);
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [generatingAudioEntryId, setGeneratingAudioEntryId] = useState<string | null>(null);
+
   // Reflection generation progress tracking
   const [reflectionProgress, setReflectionProgress] = useState<ReflectionProgress | null>(null);
 
@@ -325,6 +331,93 @@ const JournalApp: React.FC = () => {
       }
     }
   }, [userId, isDemoMode, session, authStatus]); // Re-run when user/demo/session/status changes
+
+  const stopAudio = useCallback(() => {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+    setIsPlayingAudio(false);
+    setActiveAudioEntryId(null);
+  }, []);
+
+  const playReflectionAudio = useCallback((entryId: string, audioUrl: string) => {
+    try {
+      let audio = audioRef.current;
+      if (!audio) {
+        audio = new Audio();
+        audioRef.current = audio;
+      }
+
+      // If toggling the currently-playing entry, stop it.
+      if (activeAudioEntryId === entryId && isPlayingAudio) {
+        audio.pause();
+        audio.currentTime = 0;
+        setIsPlayingAudio(false);
+        setActiveAudioEntryId(null);
+        return;
+      }
+
+      // Switch to this entry
+      audio.pause();
+      audio.currentTime = 0;
+      audio.src = audioUrl;
+
+      setActiveAudioEntryId(entryId);
+      setIsPlayingAudio(true);
+
+      audio.onended = () => {
+        setIsPlayingAudio(false);
+        setActiveAudioEntryId(null);
+      };
+      audio.onerror = () => {
+        setIsPlayingAudio(false);
+        setActiveAudioEntryId(null);
+        showToast('Audio playback failed', 'error');
+      };
+
+      void audio.play().catch((err) => {
+        setIsPlayingAudio(false);
+        setActiveAudioEntryId(null);
+        console.error('Audio play failed:', err);
+        showToast('Audio playback was blocked by the browser', 'error');
+      });
+    } catch (err) {
+      console.error('playReflectionAudio error:', err);
+      showToast('Audio playback failed', 'error');
+    }
+  }, [activeAudioEntryId, isPlayingAudio]);
+
+  const generateReflectionAudio = useCallback(async (entryId: string, text: string) => {
+    if (generatingAudioEntryId) return;
+    setGeneratingAudioEntryId(entryId);
+    try {
+      const resp = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entryId, text }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data?.message || data?.error || `TTS failed (${resp.status})`);
+      }
+      const data = await resp.json();
+      const audioUrl = data?.audioUrl as string | undefined;
+      if (!audioUrl) throw new Error('No audioUrl returned');
+
+      setHistory((prev) =>
+        prev.map((h) => (h.id === entryId ? { ...h, reflectionAudioUrl: audioUrl } : h))
+      );
+
+      showToast('Voice generated', 'success');
+    } catch (err: any) {
+      console.error('generateReflectionAudio failed:', err);
+      showToast(err?.message || 'Failed to generate voice', 'error');
+    } finally {
+      setGeneratingAudioEntryId(null);
+    }
+  }, [generatingAudioEntryId]);
 
   // Refetch history when switching to History view to ensure fresh data
   useEffect(() => {
@@ -874,6 +967,81 @@ const JournalApp: React.FC = () => {
             <ReflectionCard
               reflection={reflection}
               isLoading={status === AppStatus.LOADING}
+              audioActions={
+                userId && !isDemoMode && reflection && currentHistoryId ? (
+                  (() => {
+                    const currentEntry = history.find(h => h.id === currentHistoryId);
+                    const audioUrl = currentEntry?.reflectionAudioUrl;
+                    const isThisGenerating = generatingAudioEntryId === currentHistoryId;
+                    const isThisPlaying = activeAudioEntryId === currentHistoryId && isPlayingAudio;
+
+                    return audioUrl ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => playReflectionAudio(currentHistoryId, audioUrl)}
+                          disabled={isThisGenerating}
+                          className="transition-all p-4 md:p-3.5 rounded-full active:scale-90 touch-manipulation min-h-[56px] min-w-[56px] md:min-h-[52px] md:min-w-[52px] flex items-center justify-center"
+                          style={{
+                            background: isThisPlaying ? '#DFF3E6' : '#EEE9E1',
+                            color: '#3A3530',
+                            opacity: isThisGenerating ? 0.6 : 1,
+                            cursor: isThisGenerating ? 'not-allowed' : 'pointer',
+                          }}
+                          title={isThisPlaying ? 'Playing' : 'Play'}
+                        >
+                          {isThisPlaying ? (
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6" />
+                            </svg>
+                          ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                            </svg>
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={stopAudio}
+                          disabled={!isThisPlaying}
+                          className="transition-all p-4 md:p-3.5 rounded-full active:scale-90 touch-manipulation min-h-[56px] min-w-[56px] md:min-h-[52px] md:min-w-[52px] flex items-center justify-center"
+                          style={{
+                            background: '#EEE9E1',
+                            color: '#6B5F52',
+                            opacity: isThisPlaying ? 1 : 0.5,
+                            cursor: isThisPlaying ? 'pointer' : 'not-allowed',
+                          }}
+                          title="Stop"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 10h6v4H9z" />
+                          </svg>
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => generateReflectionAudio(currentHistoryId, reflection.content)}
+                        disabled={isThisGenerating}
+                        className="transition-all px-5 py-3 rounded-full active:scale-95 touch-manipulation text-sm md:text-[13px] min-h-[48px]"
+                        style={{
+                          background: '#EEE9E1',
+                          color: '#3A3530',
+                          letterSpacing: '0.12em',
+                          textTransform: 'uppercase',
+                          fontFamily: "'Helvetica Neue', sans-serif",
+                          opacity: isThisGenerating ? 0.6 : 1,
+                          cursor: isThisGenerating ? 'not-allowed' : 'pointer',
+                        }}
+                        title="Generate voice"
+                      >
+                        {isThisGenerating ? 'Generating…' : 'Generate voice'}
+                      </button>
+                    );
+                  })()
+                ) : null
+              }
             />
 
           </div>
@@ -883,6 +1051,12 @@ const JournalApp: React.FC = () => {
             onBack={() => setViewMode(ViewMode.JOURNAL)}
             onDeleteEntry={deleteHistoryEntry}
             onClearAll={clearAllHistory}
+            onPlayReflectionAudio={playReflectionAudio}
+            onStopAudio={stopAudio}
+            activeAudioEntryId={activeAudioEntryId}
+            isPlayingAudio={isPlayingAudio}
+            onGenerateReflectionAudio={generateReflectionAudio}
+            generatingAudioEntryId={generatingAudioEntryId}
           />
         )}
       </main>

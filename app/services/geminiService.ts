@@ -2,7 +2,9 @@
 import { GoogleGenAI, Chat, Modality, Type, createUserContent } from "@google/genai";
 import { HistoryEntry, ChatMessage, Mood, ExtractedEntities, Highlight, ReflectionProgressCallback, TokenUsage } from "../types";
 import logger from "../utils/logger";
-import { extractEntities } from "../utils/entityExtraction";
+import { extractEntitiesAndTopic } from "../utils/entityExtraction";
+import { withGeminiRetry } from "../utils/geminiRetry";
+import { getGeminiModel } from "../utils/geminiModel";
 import { buildEntityContext, formatEntityContextForPrompt } from "./entityTrackingService";
 
 const log = logger.module('GeminiService');
@@ -55,6 +57,28 @@ const SEMANTIC_WEIGHT = 0.75; // Semantic similarity weight (75%)
 const MOOD_WEIGHT = 0.25; // Mood/emotion metadata weight (25%)
 const MIN_RELEVANCE_SCORE = 0.3; // Minimum relevance score to include entry
 const RE_RANK_TOP_K = 20; // Top K entries to re-rank (lightweight post-filter)
+
+/** Max past entries to embed for relevance (client-safe: NEXT_PUBLIC_* or server env). */
+const REFLECTION_EMBED_HISTORY_MAX = Math.max(
+  1,
+  parseInt(
+    process.env.NEXT_PUBLIC_REFLECTION_EMBED_HISTORY_MAX ||
+      process.env.REFLECTION_EMBED_HISTORY_MAX ||
+      '25',
+    10
+  )
+);
+
+const REFLECTION_FAST_PATH =
+  process.env.NEXT_PUBLIC_REFLECTION_FAST_PATH === 'true' ||
+  process.env.REFLECTION_FAST_PATH === 'true';
+
+function capHistoryForEmbedding(history: HistoryEntry[]): HistoryEntry[] {
+  if (history.length <= REFLECTION_EMBED_HISTORY_MAX) return history;
+  return [...history]
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, REFLECTION_EMBED_HISTORY_MAX);
+}
 
 // Rough token estimation (4 chars ≈ 1 token for English text)
 function estimateTokens(text: string): number {
@@ -359,6 +383,16 @@ async function selectRelevantContext(
     return "No previous history available.";
   }
 
+  // Skip embeddings for tiny history when enabled — recency-only context string
+  const FAST_PATH_MAX = 3;
+  if (REFLECTION_FAST_PATH && history.length <= FAST_PATH_MAX) {
+    const sorted = [...history].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+    log.debug('Fast path: recency-only context (no embeddings)', { entries: history.length });
+    return sorted.map((e) => formatEntryForContext(e, includeReflection)).join('\n\n---\n\n');
+  }
+
   // STEP 1: Generate single embedding for current entry
   let currentEmbedding: number[] | null = null;
   try {
@@ -499,6 +533,12 @@ declare const process: {
   env: {
     NEXT_PUBLIC_GEMINI_API_KEY?: string;
     GEMINI_API_KEY?: string;
+    NEXT_PUBLIC_GEMINI_MODEL?: string;
+    GEMINI_MODEL?: string;
+    NEXT_PUBLIC_REFLECTION_EMBED_HISTORY_MAX?: string;
+    REFLECTION_EMBED_HISTORY_MAX?: string;
+    NEXT_PUBLIC_REFLECTION_FAST_PATH?: string;
+    REFLECTION_FAST_PATH?: string;
   };
 };
 
@@ -517,7 +557,7 @@ interface CacheInfo {
 
 let systemInstructionCache: CacheInfo | null = null;
 const CACHE_TTL_SECONDS = 3600; // 1 hour (default TTL)
-const MODEL_NAME = 'gemini-3-flash-preview';
+const MODEL_NAME = getGeminiModel();
 
 // Note: Chat API (ai.chats.create) uses dynamic system instructions that include
 // entry-specific context, so explicit caching isn't applicable there.
@@ -598,53 +638,48 @@ export const getJournalReflection = async (
   }
   const ai = new GoogleGenAI({ apiKey });
 
-  // Step 1: Extract entities from current entry (parallel with mood/topic detection)
+  // Step 1–2: Entities + topic in one Gemini call (faster than sequential extract + detect)
   onProgress?.({ stage: 'extracting_entities', message: 'Analyzing entry...' });
   let currentEntities: ExtractedEntities | undefined;
+  let detectedTopic: string | undefined;
   try {
-    log.debug('Extracting entities from current entry');
-    currentEntities = await extractEntities(entry);
-    log.info('Entities extracted', {
-      people: currentEntities.people.length,
-      places: currentEntities.places.length,
-      events: currentEntities.events.length,
-      organizations: currentEntities.organizations.length
+    log.debug('Extracting entities and topic (single call)');
+    const prep = await extractEntitiesAndTopic(entry);
+    currentEntities = prep.entities;
+    detectedTopic = prep.topic;
+    onProgress?.({ stage: 'detecting_topic', message: 'Analyzing entry...' });
+    log.info('Prep complete', {
+      people: prep.entities.people.length,
+      places: prep.entities.places.length,
+      events: prep.entities.events.length,
+      organizations: prep.entities.organizations.length,
+      topic: prep.topic,
     });
   } catch (error) {
-    log.error('Entity extraction failed', {}, error as Error);
-    // Continue without entities - don't break the flow
+    log.error('Entity+topic extraction failed', {}, error as Error);
   }
 
   let finalMood: Mood = 'none';
-
-  // Step 2: Detect topic FIRST so we can use it for better context selection
-  onProgress?.({ stage: 'detecting_topic', message: 'Analyzing entry...' });
-  let detectedTopic: string | undefined;
-  try {
-    log.debug('Detecting topic for entry');
-    detectedTopic = await detectTopic(entry);
-    if (detectedTopic) {
-      log.info('Topic detected for reflection', { topic: detectedTopic });
-    } else {
-      log.debug('No topic detected (entry may be too short or topic unclear)');
-    }
-  } catch (topicError) {
-    log.error('Topic detection error during reflection', {}, topicError as Error);
-    // Continue without topic if detection fails
-  }
 
   // Step 4: Build entity context from history (last 3 entries)
   onProgress?.({ stage: 'building_context', message: 'Searching memories...' });
   const entityContext = buildEntityContext(history, 3);
   const entityContextPrompt = formatEntityContextForPrompt(entityContext);
 
-  // Step 5: Use improved context selection with topic (now async with embeddings)
-  // Use detected mood for better context selection
+  // Step 5: Relevance context — embed at most REFLECTION_EMBED_HISTORY_MAX recent entries
+  const historyForEmbedding = capHistoryForEmbedding(history);
+  if (historyForEmbedding.length < history.length) {
+    log.debug('Capped history for embedding', {
+      total: history.length,
+      capped: historyForEmbedding.length,
+      max: REFLECTION_EMBED_HISTORY_MAX,
+    });
+  }
   const historyContext = await selectRelevantContext(
     entry,
     finalMood,
     detectedTopic,
-    history,
+    historyForEmbedding,
     MAX_CONTEXT_TOKENS_REFLECTION,
     true // Include reflections for reflection generation
   );
@@ -757,11 +792,13 @@ Please provide your reflection and a concise summary.
       log.debug('Using direct system instruction for reflection (no cache)');
     }
 
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: prompt,
-      config,
-    });
+    const response = await withGeminiRetry(() =>
+      ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: prompt,
+        config,
+      })
+    );
 
     const data = JSON.parse(response.text || "{}");
     const reflectionContent = data.reflection || "I'm processing your thoughts. Thank you for sharing.";
@@ -995,29 +1032,31 @@ Identify the main topic:`;
 
   try {
     // Use structured output for more reliable topic detection
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: topicDetectionPrompt,
-      config: {
-        temperature: 0.5, // Balanced for understanding and consistency
-        maxOutputTokens: 30, // Allow for descriptive topics
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            topic: {
-              type: Type.STRING,
-              description: "The main topic or theme (1-3 words)"
+    const response = await withGeminiRetry(() =>
+      ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: topicDetectionPrompt,
+        config: {
+          temperature: 0.5, // Balanced for understanding and consistency
+          maxOutputTokens: 30, // Allow for descriptive topics
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              topic: {
+                type: Type.STRING,
+                description: "The main topic or theme (1-3 words)"
+              },
+              confidence: {
+                type: Type.STRING,
+                description: "high, medium, or low - how clear the topic is"
+              }
             },
-            confidence: {
-              type: Type.STRING,
-              description: "high, medium, or low - how clear the topic is"
-            }
-          },
-          required: ["topic"]
-        }
-      },
-    });
+            required: ["topic"]
+          }
+        },
+      })
+    );
 
     // Parse JSON response
     let detectedTopic: string | undefined;

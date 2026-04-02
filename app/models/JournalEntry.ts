@@ -5,6 +5,7 @@ export interface JournalEntryDoc {
   userId: string;
   entryText: string;
   reflectionText: string;
+  reflectionAudioUrl?: string | null;
   summary?: string | null;
   topic?: string | null;
   mood?: string | null;
@@ -20,6 +21,7 @@ const JournalEntrySchema = new Schema<JournalEntryDoc>(
     userId: { type: String, required: true, index: true },
     entryText: { type: String, required: true },
     reflectionText: { type: String, required: true },
+    reflectionAudioUrl: { type: String, default: null },
     summary: { type: String, default: null },
     topic: { type: String, default: null },
     mood: { type: String, default: null },

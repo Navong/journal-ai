@@ -14,6 +14,7 @@ function toApiEntry(doc: any) {
     userId: doc.userId,
     entryText: doc.entryText,
     reflectionText: doc.reflectionText,
+    reflectionAudioUrl: doc.reflectionAudioUrl ?? null,
     summary: doc.summary ?? null,
     topic: doc.topic ?? null,
     mood: doc.mood ?? null,
@@ -119,19 +120,31 @@ export async function POST(request: NextRequest) {
     // SECURITY: ensure we never allow changing userId on an existing doc.
     const ops = entries.map((entryData: any) => {
       const createdAt = entryData.created_at ? new Date(entryData.created_at) : new Date();
+      const maybeAudioUrl =
+        typeof entryData.reflection_audio_url === 'string' && entryData.reflection_audio_url.trim()
+          ? entryData.reflection_audio_url.trim()
+          : undefined;
+
+      const $set: Record<string, unknown> = {
+        entryText: entryData.entry_text,
+        reflectionText: entryData.reflection_text,
+        summary: entryData.summary || null,
+        topic: entryData.topic || null,
+        mood: entryData.mood ?? null,
+        entities: entryData.entities || null,
+        highlights: entryData.highlights || null,
+      };
+
+      // Preserve existing audio URL unless explicitly provided.
+      if (maybeAudioUrl) {
+        $set.reflectionAudioUrl = maybeAudioUrl;
+      }
+
       return {
         updateOne: {
           filter: { _id: entryData.id, userId },
           update: {
-            $set: {
-              entryText: entryData.entry_text,
-              reflectionText: entryData.reflection_text,
-              summary: entryData.summary || null,
-              topic: entryData.topic || null,
-              mood: entryData.mood ?? null,
-              entities: entryData.entities || null,
-              highlights: entryData.highlights || null,
-            },
+            $set,
             $setOnInsert: {
               _id: entryData.id,
               userId,

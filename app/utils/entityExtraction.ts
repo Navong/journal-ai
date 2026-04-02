@@ -1,6 +1,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ExtractedEntities } from "../types";
 import logger from "./logger";
+import { withGeminiRetry } from "./geminiRetry";
+import { getGeminiModel } from "./geminiModel";
 
 const log = logger.module('EntityExtraction');
 
@@ -8,102 +10,115 @@ const getApiKey = (): string => {
   return process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
 };
 
+function normalizeTopicFromModel(detectedTopic: string | undefined): string | undefined {
+  if (!detectedTopic?.trim()) return undefined;
+  const cleanedTopic = detectedTopic
+    .replace(/^["']|["']$/g, '')
+    .replace(/^topic\s*[:\-]\s*/i, '')
+    .split(/[,;.\n]/)[0]
+    .split(/\s+/)
+    .slice(0, 3)
+    .join(' ')
+    .trim()
+    .toLowerCase();
+  if (!cleanedTopic || cleanedTopic === 'none' || cleanedTopic === 'general') {
+    return undefined;
+  }
+  return cleanedTopic
+    .split(/\s+/)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
 /**
- * Extract entities (people, places, events, organizations) from journal text
- * Uses Gemini AI with structured output for reliable extraction
+ * Single Gemini call: entities + main topic (1 LLM round-trip for reflection prep).
  */
-export async function extractEntities(text: string): Promise<ExtractedEntities> {
+export async function extractEntitiesAndTopic(
+  text: string
+): Promise<{ entities: ExtractedEntities; topic: string | undefined }> {
+  const empty = { entities: { people: [], places: [], events: [], organizations: [] } as ExtractedEntities, topic: undefined as string | undefined };
   const apiKey = getApiKey();
   if (!apiKey) {
     log.warn('No API key available for entity extraction');
-    return { people: [], places: [], events: [], organizations: [] };
+    return empty;
   }
 
-  if (!text.trim() || text.trim().length < 20) {
-    log.debug('Text too short for entity extraction', { length: text.trim().length });
-    return { people: [], places: [], events: [], organizations: [] };
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length < 15) {
+    log.debug('Text too short for entity+topic extraction', { length: trimmed.length });
+    return empty;
   }
 
   try {
     const ai = new GoogleGenAI({ apiKey });
+    const model = getGeminiModel();
 
-    const prompt = `Extract specific entities from this journal entry. Be precise and only extract explicitly mentioned entities.
+    const prompt = `Extract specific entities from this journal entry AND identify the main topic or theme.
 
-**Extract:**
-1. **People**: Names of people mentioned (first names or full names). Do NOT extract pronouns like "he", "she", "they". Include family references like "Mom", "Dad", "Sister" if mentioned.
-2. **Places**: Specific locations (cities, venues, buildings, restaurants, etc.). Include "office", "home", "gym", specific neighborhoods. Be specific.
-3. **Events**: Meetings, appointments, deadlines, important dates. Extract the event name and date if mentioned. Mark if it's a deadline or urgent.
-4. **Organizations**: Companies, schools, teams, groups, clubs.
+**Entities — extract only what is explicitly mentioned:**
+1. **People**: Names (not pronouns). Include Mom, Dad, Sister, etc.
+2. **Places**: Cities, venues, office, home, gym, etc.
+3. **Events**: Meetings, deadlines, dates. Mark deadline/urgent when clear.
+4. **Organizations**: Companies, schools, teams, groups.
 
-**Guidelines:**
-- Only extract entities that are explicitly mentioned in the text
-- For events, identify if it's a deadline/urgent by context (words like "deadline", "due", "urgent", "must finish")
-- For events with dates, try to extract approximate date (look for "on Monday", "next Friday", "December 15", "tomorrow", "next week", etc.)
-- Normalize names (e.g., "mom" -> "Mom", "dr. smith" -> "Dr. Smith")
-- Be conservative - don't over-extract or make assumptions
-- Skip generic pronouns and vague references
+**Topic (separate field):**
+- WHAT they are writing about (subject matter), not mood.
+- 1–3 words, specific (e.g. "work stress", "family conflict").
+- If vague, use "general" or leave topic empty.
 
 Journal entry:
-"${text.trim()}"
+"${trimmed}"`;
 
-Extract entities:`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
-      config: {
-        temperature: 0.3, // Low temperature for consistent extraction
-        maxOutputTokens: 500,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            people: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "Names of people mentioned (first names or full names, family titles like Mom/Dad)"
-            },
-            places: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "Specific locations mentioned (cities, buildings, venues, neighborhoods)"
-            },
-            events: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  name: { 
-                    type: Type.STRING, 
-                    description: "Name of the event/meeting/deadline" 
-                  },
-                  date: { 
-                    type: Type.STRING, 
-                    description: "Approximate date if mentioned (ISO format preferred, or relative like 'next Friday')" 
-                  },
-                  deadline: { 
-                    type: Type.BOOLEAN, 
-                    description: "True if this is a deadline or urgent event" 
-                  },
-                  description: { 
-                    type: Type.STRING, 
-                    description: "Brief context or additional details" 
-                  }
-                },
-                required: ["name"]
+    const response = await withGeminiRetry(() =>
+      ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+          temperature: 0.3,
+          maxOutputTokens: 500,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              people: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: "Names of people mentioned (first names or full names, family titles like Mom/Dad)",
               },
-              description: "Events, meetings, appointments, deadlines mentioned"
+              places: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: "Specific locations mentioned (cities, buildings, venues, neighborhoods)",
+              },
+              events: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING, description: "Name of the event/meeting/deadline" },
+                    date: { type: Type.STRING, description: "Approximate date if mentioned" },
+                    deadline: { type: Type.BOOLEAN, description: "True if deadline or urgent" },
+                    description: { type: Type.STRING, description: "Brief context" },
+                  },
+                  required: ["name"],
+                },
+                description: "Events, meetings, appointments, deadlines mentioned",
+              },
+              organizations: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: "Companies, schools, teams, groups, clubs mentioned",
+              },
+              topic: {
+                type: Type.STRING,
+                description: "Main topic or theme, 1-3 words; empty or 'general' if unclear",
+              },
             },
-            organizations: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "Companies, schools, teams, groups, clubs mentioned"
-            }
+            required: ["people", "places", "events", "organizations"],
           },
-          required: ["people", "places", "events", "organizations"]
-        }
-      }
-    });
+        },
+      })
+    );
 
     // Clean and parse the response text
     let responseText = response.text || '{}';
@@ -135,25 +150,28 @@ Extract entities:`;
         responseLength: responseText.length,
         preview: responseText.substring(0, 100)
       });
-      return { people: [], places: [], events: [], organizations: [] };
+      return empty;
     }
-    
+
     let data: any;
     try {
       data = JSON.parse(responseText);
     } catch (parseError) {
-      log.error('Failed to parse JSON response', { 
-        responseText: responseText.substring(0, 500), // Log first 500 chars for debugging
-        responseLength: responseText.length,
-        error: parseError instanceof Error ? parseError.message : String(parseError)
-      }, parseError as Error);
-      return { people: [], places: [], events: [], organizations: [] };
+      log.error(
+        'Failed to parse JSON response',
+        {
+          responseText: responseText.substring(0, 500),
+          responseLength: responseText.length,
+          error: parseError instanceof Error ? parseError.message : String(parseError),
+        },
+        parseError as Error
+      );
+      return empty;
     }
-    
-    // Validate data structure
+
     if (!data || typeof data !== 'object') {
       log.warn('Invalid data structure from entity extraction', { data });
-      return { people: [], places: [], events: [], organizations: [] };
+      return empty;
     }
     
     const entities: ExtractedEntities = {
@@ -163,17 +181,28 @@ Extract entities:`;
       organizations: Array.isArray(data.organizations) ? data.organizations.filter((o: string) => o && o.trim()) : [],
     };
 
-    log.info('Entities extracted successfully', {
+    const topic = normalizeTopicFromModel(typeof data.topic === 'string' ? data.topic : undefined);
+
+    log.info('Entities + topic extracted', {
       people: entities.people.length,
       places: entities.places.length,
       events: entities.events.length,
-      organizations: entities.organizations.length
+      organizations: entities.organizations.length,
+      topic,
     });
 
-    return entities;
+    return { entities, topic };
   } catch (error) {
-    log.error('Entity extraction failed', {}, error as Error);
-    // Return empty entities on error, don't break the flow
-    return { people: [], places: [], events: [], organizations: [] };
+    log.error('Entity+topic extraction failed', {}, error as Error);
+    return empty;
   }
+}
+
+/**
+ * Extract entities (people, places, events, organizations) from journal text
+ * Uses Gemini AI with structured output for reliable extraction
+ */
+export async function extractEntities(text: string): Promise<ExtractedEntities> {
+  const { entities } = await extractEntitiesAndTopic(text);
+  return entities;
 }

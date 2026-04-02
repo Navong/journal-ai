@@ -13,6 +13,12 @@ interface HistoryViewProps {
   onBack: () => void;
   onDeleteEntry?: (id: string) => void;
   onClearAll?: () => void;
+  onPlayReflectionAudio?: (entryId: string, audioUrl: string) => void;
+  onStopAudio?: () => void;
+  activeAudioEntryId?: string | null;
+  isPlayingAudio?: boolean;
+  onGenerateReflectionAudio?: (entryId: string, text: string) => void;
+  generatingAudioEntryId?: string | null;
 }
 
 const ITEMS_PER_PAGE = 5;
@@ -22,6 +28,12 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onBack,
   onDeleteEntry,
   onClearAll,
+  onPlayReflectionAudio,
+  onStopAudio,
+  activeAudioEntryId = null,
+  isPlayingAudio = false,
+  onGenerateReflectionAudio,
+  generatingAudioEntryId = null,
 }) => {
   const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set());
   const [deleteDialogId, setDeleteDialogId] = useState<string | null>(null);
@@ -327,6 +339,77 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       highlights={item.highlights}
                     />
                   </div>
+
+                  {(onPlayReflectionAudio || onGenerateReflectionAudio) && (
+                    <div className="mt-5 flex justify-end gap-2 border-t border-[#E0D8CE] pt-4">
+                      {item.reflectionAudioUrl ? (
+                        <>
+                          <button
+                            onClick={() => {
+                              if (!onPlayReflectionAudio) return;
+                              onPlayReflectionAudio(item.id, item.reflectionAudioUrl!);
+                            }}
+                            disabled={generatingAudioEntryId === item.id}
+                            className="transition-all p-4 md:p-3.5 rounded-full active:scale-90 touch-manipulation min-h-[56px] min-w-[56px] md:min-h-[52px] md:min-w-[52px] flex items-center justify-center"
+                            style={{
+                              background: activeAudioEntryId === item.id && isPlayingAudio ? '#DFF3E6' : '#EEE9E1',
+                              color: '#3A3530',
+                              opacity: generatingAudioEntryId === item.id ? 0.5 : 1,
+                              cursor: generatingAudioEntryId === item.id ? 'not-allowed' : 'pointer',
+                            }}
+                            title={activeAudioEntryId === item.id && isPlayingAudio ? 'Playing' : 'Play'}
+                          >
+                            {activeAudioEntryId === item.id && isPlayingAudio ? (
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6" />
+                              </svg>
+                            ) : (
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                              </svg>
+                            )}
+                          </button>
+
+                          {onStopAudio && (
+                            <button
+                              onClick={onStopAudio}
+                              disabled={!(activeAudioEntryId === item.id && isPlayingAudio)}
+                              className="transition-all p-4 md:p-3.5 rounded-full active:scale-90 touch-manipulation min-h-[56px] min-w-[56px] md:min-h-[52px] md:min-w-[52px] flex items-center justify-center"
+                              style={{
+                                background: '#EEE9E1',
+                                color: '#6B5F52',
+                                opacity: activeAudioEntryId === item.id && isPlayingAudio ? 1 : 0.5,
+                                cursor: activeAudioEntryId === item.id && isPlayingAudio ? 'pointer' : 'not-allowed',
+                              }}
+                              title="Stop"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 10h6v4H9z" />
+                              </svg>
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => onGenerateReflectionAudio?.(item.id, item.reflection)}
+                          disabled={generatingAudioEntryId === item.id}
+                          className="transition-all px-5 py-3 rounded-full active:scale-95 touch-manipulation text-sm md:text-[13px] min-h-[48px]"
+                          style={{
+                            background: '#EEE9E1',
+                            color: '#3A3530',
+                            letterSpacing: '0.12em',
+                            textTransform: 'uppercase',
+                            fontFamily: "'Helvetica Neue', sans-serif",
+                            opacity: generatingAudioEntryId === item.id ? 0.6 : 1,
+                            cursor: generatingAudioEntryId === item.id ? 'not-allowed' : 'pointer',
+                          }}
+                          title="Generate voice"
+                        >
+                          {generatingAudioEntryId === item.id ? 'Generating…' : 'Generate voice'}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Chat Thread */}
