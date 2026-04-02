@@ -25,7 +25,7 @@ A clean, calming journaling app that generates thoughtful AI reflections to supp
 
 ## End-to-end flow
 
-Past entries are **ranked for context** (embeddings by default; optional fast path when history is tiny — see env table). The dashed branch is optional **TTS**: **Amazon Polly** synthesizes speech, audio is stored in **S3**, and **`reflectionAudioUrl`** is saved on the entry in **MongoDB**. Mermaid renders on GitHub and many editors.
+Past entries are **ranked for context** (embeddings by default; optional fast path when history is tiny — tune with `REFLECTION_EMBED_HISTORY_MAX` / `REFLECTION_FAST_PATH`, or `NEXT_PUBLIC_*` equivalents). The dashed branch is optional **TTS**: **Amazon Polly** synthesizes speech, audio is stored in **S3**, and **`reflectionAudioUrl`** is saved on the entry in **MongoDB**. Mermaid renders on GitHub and many editors.
 
 ```mermaid
 flowchart TD
@@ -73,13 +73,6 @@ Create `.env.local` (recommended) or `.env`. **Do not commit secrets**; rotate a
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Yes* | Google OAuth (*unless Demo Mode / Dev Login only) |
 | `MONGODB_URI` | Yes* | MongoDB for entries + preferences (*not required for Demo Mode) |
 | `NEXT_PUBLIC_ENABLE_GOOGLE_AUTH` | No | Set to `true` to enable Google sign-in in the UI |
-
-**Reflection speed (optional):**
-
-| Variable | Default | Used for |
-| --- | --- | --- |
-| `NEXT_PUBLIC_REFLECTION_EMBED_HISTORY_MAX` or `REFLECTION_EMBED_HISTORY_MAX` | `25` | Max past entries embedded for relevance scoring |
-| `NEXT_PUBLIC_REFLECTION_FAST_PATH` or `REFLECTION_FAST_PATH` | off | If `true`, skip embeddings when history has ≤ 3 entries (recency-only context) |
 
 **TTS (optional, signed-in users):**
 
