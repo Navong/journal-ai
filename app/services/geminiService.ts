@@ -1,6 +1,6 @@
 
-import { GoogleGenAI, Chat, Modality, Type, createUserContent } from "@google/genai";
-import { HistoryEntry, ChatMessage, Mood, ExtractedEntities, Highlight, ReflectionProgressCallback, TokenUsage } from "../types";
+import { GoogleGenAI, Modality, Type, createUserContent } from "@google/genai";
+import { HistoryEntry, Mood, ExtractedEntities, Highlight, ReflectionProgressCallback, TokenUsage } from "../types";
 import logger from "../utils/logger";
 import { extractEntitiesAndTopic } from "../utils/entityExtraction";
 import { withGeminiRetry } from "../utils/geminiRetry";
@@ -22,7 +22,6 @@ ROLE & OBJECTIVES:
 3. DETAIL AWARENESS: Pay close attention to specific entities (names, places, events) and acknowledge them when relevant. Be a great personal assistant, not just emotional support.
 4. PATTERN RECOGNITION: Notice when people/places/events recur across entries and acknowledge progress or changes.
 5. NON-CLINICAL: Stay supportive and non-diagnostic. Use warm, human-centric language.
-6. CHAT MODE: When the user asks follow-up questions, continue to be their companion with detail awareness.
 
 **⚠️ CONTEXT CHECKLIST (Check before every response):**
 ☐ Did the user mention a specific person's name in the last 3 entries?
@@ -49,7 +48,6 @@ You must provide your response in JSON format with two fields:
 
 // Context configuration constants
 const MAX_CONTEXT_TOKENS_REFLECTION = 2500;
-const MAX_CONTEXT_TOKENS_CHAT = 1500;
 const DAYS_RECENT = 3; // Entries within this many days use full text
 const DAYS_MEDIUM = 14; // Entries within this many days use summaries
 // Single vector + emotion metadata architecture
@@ -559,10 +557,6 @@ let systemInstructionCache: CacheInfo | null = null;
 const CACHE_TTL_SECONDS = 3600; // 1 hour (default TTL)
 const MODEL_NAME = getGeminiModel();
 
-// Note: Chat API (ai.chats.create) uses dynamic system instructions that include
-// entry-specific context, so explicit caching isn't applicable there.
-// The main benefit is in reflection generation which uses the static SYSTEM_INSTRUCTION.
-
 // Get or create a cache for the system instruction
 async function getSystemInstructionCache(ai: GoogleGenAI): Promise<string | null> {
   const apiKey = getApiKey();
@@ -916,69 +910,6 @@ Please provide your reflection and a concise summary.
     log.error('Gemini API error during reflection generation', {}, error as Error);
     throw error;
   }
-};
-
-export const startJournalChat = async (
-  entry: string,
-  initialReflection: string,
-  mood: string,
-  history: HistoryEntry[],
-  currentTopic?: string
-): Promise<Chat> => {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not configured. Please set NEXT_PUBLIC_GEMINI_API_KEY in your .env.local file');
-  }
-  const ai = new GoogleGenAI({ apiKey });
-
-  // Build entity context for chat (last 3 entries)
-  const entityContext = buildEntityContext(history, 3);
-  const entityContextPrompt = formatEntityContextForPrompt(entityContext);
-
-  // Use improved context selection for chat (more focused, less tokens)
-  // Use topic from the current reflection for better context (now async with embeddings)
-  const historyContext = await selectRelevantContext(
-    entry,
-    mood as Mood,
-    currentTopic,
-    history,
-    MAX_CONTEXT_TOKENS_CHAT,
-    false // Don't include full reflections in chat context to save tokens
-  );
-
-  return ai.chats.create({
-    model: MODEL_NAME,
-    config: {
-      systemInstruction: `${SYSTEM_INSTRUCTION}
-
-CONTEXT FOR THIS CONVERSATION:
-
-**Entity Context (Specific Details):**
-${entityContextPrompt}
-
-**Journal Entry:** ${entry}
-**Mood:** ${mood}
-**Your Initial Reflection:** ${initialReflection}
-
-**Relevant Past Context (labeled with relevance reasons):**
-${historyContext}
-
-**⚠️ REMEMBER THE CONTEXT CHECKLIST:**
-- Reference people by name when relevant
-- Acknowledge specific places mentioned
-- Be aware of upcoming events/deadlines
-- Notice recurring patterns in entities
-- Show you remember details to build continuity
-
-**IMPORTANT:** 
-- Focus on the current conversation context above
-- Use entity context to be detail-oriented and helpful
-- Use past entries only when they directly relate to what the user is asking
-- Do not reference irrelevant past context - focus on answering the current question
-- Each past entry is labeled with why it's relevant - ignore entries that don't match the current discussion`,
-      temperature: 0.7,
-    },
-  });
 };
 
 export const detectTopic = async (entry: string): Promise<string | undefined> => {

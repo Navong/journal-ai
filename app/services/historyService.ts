@@ -36,7 +36,6 @@ function toHistoryEntry(dbEntry: PrismaJournalEntry): HistoryEntry {
     timestamp: typeof dbEntry.createdAt === 'string'
       ? dbEntry.createdAt
       : dbEntry.createdAt.toISOString(),
-    chatHistory: [], // Initialize empty - chat history is not persisted to DB
     entities: dbEntry.entities as any || undefined, // Parse entities from JSON
     highlights: dbEntry.highlights as any || undefined, // Parse highlights from JSON
   };

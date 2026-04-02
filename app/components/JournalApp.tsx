@@ -406,9 +406,18 @@ const JournalApp: React.FC = () => {
       const audioUrl = data?.audioUrl as string | undefined;
       if (!audioUrl) throw new Error('No audioUrl returned');
 
-      setHistory((prev) =>
-        prev.map((h) => (h.id === entryId ? { ...h, reflectionAudioUrl: audioUrl } : h))
-      );
+      setHistory((prev) => {
+        const next = prev.map((h) => (h.id === entryId ? { ...h, reflectionAudioUrl: audioUrl } : h));
+        if (!isDemoMode && userId) {
+          const merged = next.find((h) => h.id === entryId);
+          if (merged) {
+            void historyService.saveEntries([merged]).catch((err) => {
+              console.error('[JournalApp] Failed to persist reflectionAudioUrl via history API', err);
+            });
+          }
+        }
+        return next;
+      });
 
       showToast('Voice generated', 'success');
     } catch (err: any) {
@@ -417,7 +426,7 @@ const JournalApp: React.FC = () => {
     } finally {
       setGeneratingAudioEntryId(null);
     }
-  }, [generatingAudioEntryId]);
+  }, [generatingAudioEntryId, isDemoMode, userId]);
 
   // Refetch history when switching to History view to ensure fresh data
   useEffect(() => {
@@ -581,7 +590,6 @@ const JournalApp: React.FC = () => {
         mood: detectedMood || selectedMood, // Use AI-detected mood, fallback to selected
         topic: topic,
         timestamp: new Date().toISOString(),
-        chatHistory: [],
         entities: entities, // Save extracted entities
         highlights: highlights // Save AI-detected highlights
       };

@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { HistoryEntry } from '../types';
-import ReactMarkdown from 'react-markdown';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { EntityTags } from './EntityTags';
 import { HighlightedText } from './HighlightedText';
@@ -411,37 +410,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     </div>
                   )}
                 </div>
-
-                {/* Chat Thread */}
-                {item.chatHistory && item.chatHistory.length > 0 && (
-                  <div className="mt-6 space-y-3 md:space-y-4" style={{ borderTop: '1px solid #E8E4DD', paddingTop: 20 }}>
-                    <h4 style={{ fontSize: 10, color: '#A89E92', textTransform: 'uppercase', letterSpacing: '0.1em', fontFamily: "'Helvetica Neue', sans-serif", marginBottom: 8, fontWeight: 400 }}>Follow-up Conversation</h4>
-                    <div className="space-y-2 md:space-y-3">
-                      {item.chatHistory.map((chat, idx) => (
-                        <div key={idx} className={`flex flex-col ${chat.role === 'model' ? 'items-start' : 'items-end'}`}>
-                          <div style={{
-                            padding: '10px 16px',
-                            borderRadius: chat.role === 'model' ? '12px 12px 12px 4px' : '12px 12px 4px 12px',
-                            fontSize: 13,
-                            lineHeight: 1.6,
-                            ...(chat.role === 'model' ? {
-                              background: '#F4F1EB',
-                              color: '#4A4238',
-                              fontStyle: 'italic',
-                              fontFamily: 'Georgia, serif',
-                            } : {
-                              background: '#E8E4DD',
-                              color: '#3A3530',
-                              fontFamily: "'Helvetica Neue', sans-serif",
-                            }),
-                          }}>
-                            {chat.role === 'model' ? <ReactMarkdown>{chat.text}</ReactMarkdown> : <span className="whitespace-pre-wrap">{chat.text}</span>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </article>
             );
           })}

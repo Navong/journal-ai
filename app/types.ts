@@ -30,11 +30,6 @@ export interface Reflection {
   highlights?: Highlight[]; // AI-detected phrases to highlight
 }
 
-export interface ChatMessage {
-  role: 'user' | 'model';
-  text: string;
-}
-
 export interface HistoryEntry {
   id: string;
   text: string;
@@ -44,7 +39,6 @@ export interface HistoryEntry {
   mood: Mood;
   topic?: string; // Detected topic/tag for the journal entry
   timestamp: string;
-  chatHistory?: ChatMessage[];
   entities?: ExtractedEntities; // Extracted entities (people, places, events, organizations)
   highlights?: Highlight[]; // AI-detected phrases to highlight in reflection text
 }
