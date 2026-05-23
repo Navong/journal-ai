@@ -115,14 +115,11 @@ async function generateEmbedding(text: string): Promise<number[]> {
   try {
     const ai = new GoogleGenAI({ apiKey });
 
-    // Use Gemini embedding model (text-embedding-004)
-    // The API uses 'contents' (plural) and returns 'embeddings' (plural)
     const result = await ai.models.embedContent({
-      model: 'text-embedding-004',
-      contents: [{ text: text.trim() }],
+      model: 'gemini-embedding-2',
+      contents: [text.trim()],
     });
 
-    // Extract embedding from result (first embedding from the array)
     const embedding = result.embeddings?.[0]?.values;
 
     if (!embedding) {

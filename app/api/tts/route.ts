@@ -3,7 +3,8 @@ import { auth } from '@/app/auth';
 import logger from '@/app/utils/logger';
 import { connectMongo } from '@/app/utils/mongodb';
 import { JournalEntry } from '@/app/models/JournalEntry';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PollyClient, SynthesizeSpeechCommand } from '@aws-sdk/client-polly';
 
 const log = logger.module('api/tts');
@@ -21,11 +22,6 @@ function requireEnv(name: string): string {
   return v;
 }
 
-function buildS3PublicUrl(params: { bucket: string; region: string; key: string }): string {
-  const base = process.env.S3_PUBLIC_BASE_URL?.replace(/\/+$/, '');
-  if (base) return `${base}/${params.key}`;
-  return `https://${params.bucket}.s3.${params.region}.amazonaws.com/${params.key}`;
-}
 
 function getBucketName(): string {
   return (
@@ -79,7 +75,7 @@ export async function POST(req: NextRequest) {
     const voiceId = (process.env.TTS_VOICE_ID || 'Joanna') as any;
 
     const polly = new PollyClient({ region });
-    const s3 = new S3Client({ region });
+    const s3 = new S3Client({ region, followRegionRedirects: true });
 
     const synth = await polly.send(
       new SynthesizeSpeechCommand({
@@ -110,21 +106,26 @@ export async function POST(req: NextRequest) {
       })
     );
 
-    const reflectionAudioUrl = buildS3PublicUrl({ bucket, region, key });
+    // Presigned URL valid for 7 days — browser can fetch private S3 object
+    const playbackUrl = await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: bucket, Key: key }),
+      { expiresIn: 604800 }
+    );
 
-    // Persist URL on the entry (scoped by userId)
+    // Persist the stable S3 key path (not the presigned URL) so we can re-sign later
+    const s3Key = key;
     const updated = await JournalEntry.findOneAndUpdate(
       { _id: entryId, userId },
-      { $set: { reflectionAudioUrl } },
+      { $set: { reflectionAudioUrl: s3Key } },
       { new: true }
     ).lean();
 
     if (!updated) {
-      // We already uploaded; return URL anyway so UI can use it, but warn.
-      log.warn('Entry not found to persist audio URL', { entryId, userId });
+      log.warn('Entry not found to persist audio key', { entryId, userId });
     }
 
-    return NextResponse.json({ audioUrl: reflectionAudioUrl });
+    return NextResponse.json({ audioUrl: playbackUrl });
   } catch (error: any) {
     log.error('TTS generation failed', { userId, entryId }, error as Error);
     return NextResponse.json(
